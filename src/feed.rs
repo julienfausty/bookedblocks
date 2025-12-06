@@ -1,6 +1,8 @@
 use crate::actions::Action;
 
-use kraken_async_rs::wss::{KrakenMessageStream, KrakenWSSClient, WS_KRAKEN, WS_KRAKEN_AUTH};
+use kraken_async_rs::wss::{
+    BookSubscription, KrakenMessageStream, KrakenWSSClient, WS_KRAKEN, WS_KRAKEN_AUTH,
+};
 use kraken_async_rs::wss::{Message, WssMessage};
 
 use tokio::sync::mpsc::Sender;
@@ -13,6 +15,8 @@ pub struct Feed {
     connection: KrakenMessageStream<WssMessage>,
     // object to forward actions to
     action_sender: Sender<Action>,
+    // request id counter
+    request_id: i64,
 }
 
 impl Feed {
@@ -27,6 +31,7 @@ impl Feed {
             timeout_in_seconds,
             connection,
             action_sender: sender,
+            request_id: 0,
         })
     }
 
@@ -34,7 +39,17 @@ impl Feed {
         Ok(())
     }
 
-    pub async fn subscribe(&mut self, ticker: String) -> Result<(), String> {
-        Ok(())
+    pub async fn subscribe(&mut self, ticker: String, depth: usize) -> Result<(), String> {
+        let mut subscription = BookSubscription::new(vec![ticker]);
+        subscription.snapshot = Some(true);
+        subscription.depth = Some(depth as i32);
+
+        let subscription_message = Message::new_subscription(subscription, self.request_id.clone());
+        self.request_id += 1;
+
+        match self.connection.send(&subscription_message).await {
+            Ok(_) => Ok(()),
+            Err(message) => Err(format!("{:?}", message)),
+        }
     }
 }
