@@ -4,6 +4,8 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 mod actions;
 use actions::Action;
 
+mod feed;
+
 struct Dispatch {
     action_receiver: Receiver<Action>,
     action_sender: Sender<Action>,
