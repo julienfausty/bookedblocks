@@ -36,6 +36,7 @@ impl Dispatch {
     pub async fn run(&mut self) -> Result<(), String> {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
+                Action::Inform(message) => println!("{}", message),
                 Action::Launch => println!("Got launch action"),
                 Action::SubscribeTicker(ticker) => match self.feed.subscribe(ticker).await {
                     Ok(()) => (),
@@ -49,6 +50,8 @@ impl Dispatch {
                     },
                 },
                 Action::Quit => println!("Got quit action"),
+                Action::UpdateBook(update) => println!("{:?}", update),
+                Action::UpdateTicker(update) => println!("{:?}", update),
                 Action::WarningMessage(message) => eprintln!("{}", message),
             }
         }
