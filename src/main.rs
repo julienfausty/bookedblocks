@@ -22,6 +22,7 @@ impl Dispatch {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
                 Action::Launch => println!("Got launch action"),
+                Action::SubscribeTicker(ticker) => (),
                 Action::Quit => println!("Got quit action"),
             }
         }
