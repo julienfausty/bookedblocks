@@ -61,7 +61,7 @@ impl Dispatch {
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let mut dispatch = match Dispatch::new(100, 30, 100).await {
+    let mut dispatch = match Dispatch::new(100, 200, 100).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };

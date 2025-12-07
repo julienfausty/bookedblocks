@@ -55,7 +55,7 @@ impl TickerState {
             bid_quantity: decimal_to_f64!(ticker.bid_quantity),
             change: decimal_to_f64!(ticker.change),
             change_pct: decimal_to_f64!(ticker.change_pct),
-            high: decimal_to_f64!(ticker.change),
+            high: decimal_to_f64!(ticker.high),
             last: decimal_to_f64!(ticker.last),
             low: decimal_to_f64!(ticker.low),
             symbol: ticker.symbol,
@@ -65,7 +65,7 @@ impl TickerState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Order {
     pub price: f64,
     pub quantity: f64,
@@ -275,5 +275,293 @@ impl Feed {
             request_id: self.request_id,
             listener_handle: self.listener_handle,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use kraken_async_rs::wss::{BidAsk, L2, Orderbook, OrderbookUpdate, Ticker};
+
+    use tokio::sync::mpsc::channel;
+
+    use regex::Regex;
+    use rust_decimal::Decimal;
+
+    fn zero_ticker_case() -> Ticker {
+        Ticker {
+            ask: Decimal::ZERO,
+            ask_quantity: Decimal::ZERO,
+            bid: Decimal::ZERO,
+            bid_quantity: Decimal::ZERO,
+            change: Decimal::ZERO,
+            change_pct: Decimal::ZERO,
+            high: Decimal::ZERO,
+            last: Decimal::ZERO,
+            low: Decimal::ZERO,
+            symbol: "Ticker/Symbol".to_string(),
+            volume: Decimal::ZERO,
+            vwap: Decimal::ZERO,
+        }
+    }
+
+    fn zero_bid_ask_case() -> BidAsk {
+        BidAsk {
+            price: Decimal::ZERO,
+            quantity: Decimal::ZERO,
+        }
+    }
+
+    fn zero_orderbook_case() -> L2 {
+        L2::Orderbook(Orderbook {
+            symbol: "Ticker/Symbol".to_string(),
+            checksum: 0,
+            bids: (0..10).map(|_| zero_bid_ask_case()).collect(),
+            asks: (0..10).map(|_| zero_bid_ask_case()).collect(),
+        })
+    }
+
+    fn ascending_orderbook_case() -> L2 {
+        L2::Orderbook(Orderbook {
+            symbol: "Ticker/Symbol".to_string(),
+            checksum: 0,
+            bids: (0..10)
+                .map(|i| BidAsk {
+                    price: Decimal::new(i, 0),
+                    quantity: Decimal::ZERO,
+                })
+                .collect(),
+            asks: (0..10)
+                .map(|i| BidAsk {
+                    price: Decimal::new(-i, 0),
+                    quantity: Decimal::ZERO,
+                })
+                .collect(),
+        })
+    }
+
+    fn ascending_orderbook_update_case() -> L2 {
+        L2::Update(OrderbookUpdate {
+            symbol: "Ticker/Symbol".to_string(),
+            checksum: 0,
+            timestamp: "Mocked Timestamp".to_string(),
+            bids: (0..10)
+                .map(|i| BidAsk {
+                    price: Decimal::new(i, 0),
+                    quantity: Decimal::ZERO,
+                })
+                .collect(),
+            asks: (0..10)
+                .map(|i| BidAsk {
+                    price: Decimal::new(-i, 0),
+                    quantity: Decimal::ZERO,
+                })
+                .collect(),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_zero_ticker_transfer() {
+        let ticker = zero_ticker_case();
+        let outcome = TickerState::from_ticker(ticker);
+
+        assert!(outcome.is_ok());
+
+        let state = outcome.unwrap();
+        assert!(state.ask == 0.0);
+        assert!(state.ask_quantity == 0.0);
+        assert!(state.bid == 0.0);
+        assert!(state.bid_quantity == 0.0);
+        assert!(state.change == 0.0);
+        assert!(state.change_pct == 0.0);
+        assert!(state.high == 0.0);
+        assert!(state.last == 0.0);
+        assert!(state.low == 0.0);
+        assert!(state.symbol == "Ticker/Symbol".to_string());
+        assert!(state.volume == 0.0);
+        assert!(state.vwap == 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_values_ticker_transfer() {
+        let mut ticker = zero_ticker_case();
+        ticker.volume = Decimal::ONE;
+        ticker.vwap = Decimal::ONE_THOUSAND;
+        ticker.change = Decimal::ONE_HUNDRED;
+        let outcome = TickerState::from_ticker(ticker);
+
+        assert!(outcome.is_ok());
+
+        let state = outcome.unwrap();
+        assert!(state.ask == 0.0);
+        assert!(state.ask_quantity == 0.0);
+        assert!(state.bid == 0.0);
+        assert!(state.bid_quantity == 0.0);
+        assert!(state.change == 100.0);
+        assert!(state.change_pct == 0.0);
+        println!("{:}", state.high);
+        assert!(state.high == 0.0);
+        assert!(state.last == 0.0);
+        assert!(state.low == 0.0);
+        assert!(state.symbol == "Ticker/Symbol".to_string());
+        assert!(state.volume == 1.0);
+        assert!(state.vwap == 1000.0);
+    }
+
+    #[tokio::test]
+    async fn test_zero_bid_ask_transfer() {
+        let bid_ask = zero_bid_ask_case();
+
+        let outcome = Order::from_bid_ask(bid_ask);
+
+        assert!(outcome.is_ok());
+
+        let order = outcome.unwrap();
+        assert!(order.price == 0.0);
+        assert!(order.quantity == 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_values_bid_ask_transfer() {
+        let mut bid_ask = zero_bid_ask_case();
+        bid_ask.price = Decimal::ONE;
+        bid_ask.quantity = Decimal::ONE_HUNDRED;
+
+        let outcome = Order::from_bid_ask(bid_ask);
+
+        assert!(outcome.is_ok());
+
+        let order = outcome.unwrap();
+        assert!(order.price == 1.0);
+        assert!(order.quantity == 100.0);
+    }
+
+    #[tokio::test]
+    async fn test_booked_zeros_transfer() {
+        let l2 = zero_orderbook_case();
+
+        let outcome = Booked::from_orderbook(l2);
+
+        assert!(outcome.is_ok());
+
+        let booked = outcome.unwrap();
+
+        assert!(booked.symbol == "Ticker/Symbol".to_string());
+
+        for order in booked.bids {
+            assert!(order.price == 0.0);
+            assert!(order.quantity == 0.0);
+        }
+
+        for order in booked.asks {
+            assert!(order.price == 0.0);
+            assert!(order.quantity == 0.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_booked_ascending_transfer() {
+        let l2 = ascending_orderbook_case();
+
+        let outcome = Booked::from_orderbook(l2);
+
+        assert!(outcome.is_ok());
+
+        let booked = outcome.unwrap();
+
+        assert!(booked.symbol == "Ticker/Symbol".to_string());
+
+        for i in 0..10 {
+            assert!(booked.bids[i].price == i as f64);
+            assert!(booked.bids[i].quantity == 0.0);
+        }
+
+        for i in 0..10 {
+            assert!(booked.asks[i].price == -(i as f64));
+            assert!(booked.asks[i].quantity == 0.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_booked_update_ascending_transfer() {
+        let l2 = ascending_orderbook_update_case();
+
+        let outcome = Booked::from_orderbook(l2);
+
+        assert!(outcome.is_ok());
+
+        let booked = outcome.unwrap();
+
+        assert!(booked.symbol == "Ticker/Symbol".to_string());
+        assert!(booked.timestamp == "Mocked Timestamp".to_string());
+
+        for i in 0..10 {
+            assert!(booked.bids[i].price == i as f64);
+            assert!(booked.bids[i].quantity == 0.0);
+        }
+
+        for i in 0..10 {
+            assert!(booked.asks[i].price == -(i as f64));
+            assert!(booked.asks[i].quantity == 0.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn construct_feed() {
+        let (sender, mut receiver) = channel::<Action>(10);
+        let outcome = Feed::new(2, 10, sender).await;
+
+        assert!(outcome.is_ok());
+
+        let feed = outcome.unwrap();
+
+        let mut number_of_actions = 0;
+        while let Some(_) = receiver.recv().await {
+            number_of_actions += 1;
+        }
+
+        assert!(number_of_actions == 1);
+        assert!(feed.check_listener().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn feed_10_actions() {
+        let (sender, mut receiver) = channel::<Action>(10);
+        let outcome = Feed::new(20, 10, sender).await;
+
+        assert!(outcome.is_ok());
+
+        let mut feed = outcome.unwrap();
+
+        assert!(feed.subscribe("ETH/EUR".to_string()).await.is_ok());
+
+        for _ in 0..10 {
+            let maybe_action = receiver.recv().await;
+            assert!(maybe_action.is_some());
+        }
+
+        assert!(feed.check_listener().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn feed_subscribe_wrong_ticker() {
+        let (sender, mut receiver) = channel::<Action>(10);
+        let outcome = Feed::new(5, 10, sender).await;
+
+        assert!(outcome.is_ok());
+
+        let mut feed = outcome.unwrap();
+
+        assert!(feed.subscribe("Non/Existent".to_string()).await.is_ok());
+
+        let mut output = String::new();
+        while let Some(action) = receiver.recv().await {
+            output = format!("{}{:?}", output, action);
+        }
+
+        let pattern =
+            Regex::new(r##"Some\(\\\"Currency pair not supported Non\/Existent\\\"\)"##).unwrap();
+        assert!(pattern.is_match(&output));
     }
 }

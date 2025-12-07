@@ -89,6 +89,7 @@ dependencies = [
  "chrono",
  "kraken-async-rs",
  "num-traits",
+ "rust_decimal",
  "tokio",
  "tokio-stream",
 ]
