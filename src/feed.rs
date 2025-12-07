@@ -160,7 +160,7 @@ async fn listen_to_connection(
             let mut stream = connection.lock().await;
             match timeout(Duration::from_secs(timeout_in_seconds), stream.next()).await {
                 Ok(Some(communication)) => {
-                    let mut action = Action::Inform("".to_string());
+                    let action: Action;
                     match communication {
                         Ok(WssMessage::Channel(message)) => match message {
                             ChannelMessage::Heartbeat => break,
@@ -258,7 +258,22 @@ impl Feed {
         }
     }
 
-    pub async fn check_listener(&self) -> Result<(), String> {
-        Ok(())
+    pub async fn check_listener(self) -> Result<Option<Feed>, String> {
+        if self.listener_handle.is_finished() {
+            return match self.listener_handle.await {
+                Ok(val) => match val {
+                    Ok(()) => Ok(None),
+                    Err(message) => Err(message),
+                },
+                Err(message) => Err(format!("{:?}", message)),
+            };
+        }
+
+        Ok(Some(Feed {
+            connection: self.connection.clone(),
+            depth: self.depth,
+            request_id: self.request_id,
+            listener_handle: self.listener_handle,
+        }))
     }
 }
