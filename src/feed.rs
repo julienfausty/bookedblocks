@@ -185,10 +185,10 @@ async fn listen_to_connection(
                             action = Action::Inform(format!("{:?}", information));
                         }
                         Ok(WssMessage::Error(err)) => {
-                            action = Action::WarningMessage(format!("{:?}", err));
+                            action = Action::Warn(format!("{:?}", err));
                         }
                         Err(err) => {
-                            action = Action::WarningMessage(format!("{:?}", err));
+                            action = Action::Warn(format!("{:?}", err));
                         }
                     }
                     match sender.send(action).await {

@@ -8,5 +8,5 @@ pub enum Action {
     Quit,
     UpdateBook(Booked),
     UpdateTicker(TickerState),
-    WarningMessage(String),
+    Warn(String),
 }

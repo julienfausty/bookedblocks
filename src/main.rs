@@ -40,11 +40,7 @@ impl Dispatch {
                 Action::Launch => println!("Got launch action"),
                 Action::SubscribeTicker(ticker) => match self.feed.subscribe(ticker).await {
                     Ok(()) => (),
-                    Err(message) => match self
-                        .action_sender
-                        .send(Action::WarningMessage(message))
-                        .await
-                    {
+                    Err(message) => match self.action_sender.send(Action::Warn(message)).await {
                         Ok(_) => (),
                         Err(message) => return Err(format!("{:?}", message)),
                     },
@@ -52,7 +48,7 @@ impl Dispatch {
                 Action::Quit => println!("Got quit action"),
                 Action::UpdateBook(update) => println!("{:?}", update),
                 Action::UpdateTicker(update) => println!("{:?}", update),
-                Action::WarningMessage(message) => eprintln!("{}", message),
+                Action::Warn(message) => eprintln!("{}", message),
             }
         }
         Ok(())
