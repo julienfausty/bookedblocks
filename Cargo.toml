@@ -7,6 +7,7 @@ edition = "2024"
 chrono = "0.4.42"
 kraken-async-rs = "0.14.0"
 num-traits = "0.2.19"
+regex = "1.12.2"
 tokio = { version = "1.48.0", features = ["full"] }
 tokio-stream = "0.1.17"
 
