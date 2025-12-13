@@ -7,6 +7,8 @@ use actions::Action;
 mod feed;
 use feed::Feed;
 
+mod pipeline;
+
 struct Dispatch {
     action_receiver: Receiver<Action>,
     action_sender: Sender<Action>,
