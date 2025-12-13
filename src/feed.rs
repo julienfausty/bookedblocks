@@ -164,6 +164,7 @@ async fn listen_to_connection(
                     match communication {
                         Ok(WssMessage::Channel(message)) => match message {
                             ChannelMessage::Heartbeat => break,
+
                             ChannelMessage::Orderbook(booked) => {
                                 action =
                                     Action::UpdateBook(match Booked::from_orderbook(booked.data) {
@@ -258,6 +259,34 @@ impl Feed {
         }
     }
 
+    pub async fn unsubscribe(&mut self, ticker: String) -> Result<(), String> {
+        let mut book_subscription = BookSubscription::new(vec![ticker.clone()]);
+        book_subscription.depth = Some(self.depth);
+
+        let mut book_subscription_message =
+            Message::new_subscription(book_subscription, self.request_id.clone());
+        self.request_id += 1;
+        book_subscription_message.method = "unsubscribe".to_string();
+
+        let ticker_subscription = TickerSubscription::new(vec![ticker.clone()]);
+        let mut ticker_subscription_message =
+            Message::new_subscription(ticker_subscription, self.request_id.clone());
+        self.request_id += 1;
+        ticker_subscription_message.method = "unsubscribe".to_string();
+
+        let mut writable = self.connection.lock().await;
+
+        match writable.send(&ticker_subscription_message).await {
+            Ok(_) => (),
+            Err(message) => return Err(format!("{:?}", message)),
+        };
+
+        match writable.send(&book_subscription_message).await {
+            Ok(_) => Ok(()),
+            Err(message) => Err(format!("{:?}", message)),
+        }
+    }
+
     pub async fn check_listener(self) -> Result<Option<Feed>, String> {
         if self.listener_handle.is_finished() {
             return match self.listener_handle.await {
@@ -285,6 +314,7 @@ mod tests {
     use kraken_async_rs::wss::{BidAsk, L2, Orderbook, OrderbookUpdate, Ticker};
 
     use tokio::sync::mpsc::channel;
+    use tokio::time::{Duration, timeout};
 
     use regex::Regex;
     use rust_decimal::Decimal;
@@ -400,7 +430,6 @@ mod tests {
         assert!(state.bid_quantity == 0.0);
         assert!(state.change == 100.0);
         assert!(state.change_pct == 0.0);
-        println!("{:}", state.high);
         assert!(state.high == 0.0);
         assert!(state.last == 0.0);
         assert!(state.low == 0.0);
@@ -537,7 +566,9 @@ mod tests {
         assert!(feed.subscribe("ETH/EUR".to_string()).await.is_ok());
 
         for _ in 0..10 {
-            let maybe_action = receiver.recv().await;
+            let maybe_action = timeout(Duration::from_secs(5), receiver.recv())
+                .await
+                .unwrap();
             assert!(maybe_action.is_some());
         }
 
@@ -562,6 +593,55 @@ mod tests {
 
         let pattern =
             Regex::new(r##"Some\(\\\"Currency pair not supported Non\/Existent\\\"\)"##).unwrap();
+        assert!(pattern.is_match(&output));
+    }
+
+    #[tokio::test]
+    async fn feed_unsubscribe() {
+        let (sender, mut receiver) = channel::<Action>(10);
+        let outcome = Feed::new(2, 10, sender).await;
+
+        assert!(outcome.is_ok());
+
+        let mut feed = outcome.unwrap();
+
+        assert!(feed.subscribe("ETH/EUR".to_string()).await.is_ok());
+        assert!(feed.unsubscribe("ETH/EUR".to_string()).await.is_ok());
+
+        let mut output = String::new();
+        while let Ok(Some(action)) = timeout(Duration::from_secs(2), receiver.recv()).await {
+            output = format!("{}{:?}", output, action);
+        }
+
+        let pattern = Regex::new(r##"Some\(Ticker\(TickerSubscriptionResponse \{ symbol: \\\"ETH\/EUR\\\", event_trigger: Some\(Trades\), snapshot: Some\(true\) \}\)\)"##).unwrap();
+        assert!(pattern.is_match(&output));
+
+        let pattern = Regex::new(r##"Some\(Book\(BookSubscriptionResponse \{ symbol: \\\"ETH\/EUR\\\", depth: Some\(10\), snapshot: Some\(true\), warnings: None \}\)\)"##).unwrap();
+        assert!(pattern.is_match(&output));
+
+        // cannot check for unsubscribe because the kraken_async_rs does not support the response
+
+        // timeout does not get triggered thanks to heartbeat
+        assert!(feed.check_listener().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn feed_unsubscribe_not_previously_subscribed() {
+        let (sender, mut receiver) = channel::<Action>(10);
+        let outcome = Feed::new(2, 10, sender).await;
+
+        assert!(outcome.is_ok());
+
+        let mut feed = outcome.unwrap();
+
+        assert!(feed.unsubscribe("ETH/EUR".to_string()).await.is_ok());
+
+        let mut output = String::new();
+        while let Ok(Some(action)) = timeout(Duration::from_secs(2), receiver.recv()).await {
+            output = format!("{}{:?}", output, action);
+        }
+
+        let pattern = Regex::new(r##"Some\(\\\"Subscription Not Found\\\"\)"##).unwrap();
         assert!(pattern.is_match(&output));
     }
 }
