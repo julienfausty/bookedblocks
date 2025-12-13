@@ -94,46 +94,30 @@ impl Booked {
             L2::Orderbook(snapshot) => Ok(Booked {
                 symbol: snapshot.symbol,
                 timestamp: Utc::now().to_rfc3339(),
-                bids: match snapshot
+                bids: snapshot
                     .bids
                     .into_iter()
-                    .map(|bid_ask| Order::from_bid_ask(bid_ask))
-                    .collect()
-                {
-                    Ok(bids) => bids,
-                    Err(message) => return Err(message),
-                },
-                asks: match snapshot
+                    .map(Order::from_bid_ask)
+                    .collect::<Result<Vec<_>, String>>()?,
+                asks: snapshot
                     .asks
                     .into_iter()
-                    .map(|bid_ask| Order::from_bid_ask(bid_ask))
-                    .collect()
-                {
-                    Ok(asks) => asks,
-                    Err(message) => return Err(message),
-                },
+                    .map(Order::from_bid_ask)
+                    .collect::<Result<Vec<_>, String>>()?,
             }),
             L2::Update(update) => Ok(Booked {
                 symbol: update.symbol,
                 timestamp: update.timestamp,
-                bids: match update
+                bids: update
                     .bids
                     .into_iter()
-                    .map(|bid_ask| Order::from_bid_ask(bid_ask))
-                    .collect()
-                {
-                    Ok(bids) => bids,
-                    Err(message) => return Err(message),
-                },
-                asks: match update
+                    .map(Order::from_bid_ask)
+                    .collect::<Result<Vec<_>, String>>()?,
+                asks: update
                     .asks
                     .into_iter()
-                    .map(|bid_ask| Order::from_bid_ask(bid_ask))
-                    .collect()
-                {
-                    Ok(asks) => asks,
-                    Err(message) => return Err(message),
-                },
+                    .map(Order::from_bid_ask)
+                    .collect::<Result<Vec<_>, String>>()?,
             }),
         }
     }
@@ -238,12 +222,12 @@ impl Feed {
         book_subscription.depth = Some(self.depth);
 
         let book_subscription_message =
-            Message::new_subscription(book_subscription, self.request_id.clone());
+            Message::new_subscription(book_subscription, self.request_id);
         self.request_id += 1;
 
         let ticker_subscription = TickerSubscription::new(vec![ticker.clone()]);
         let ticker_subscription_message =
-            Message::new_subscription(ticker_subscription, self.request_id.clone());
+            Message::new_subscription(ticker_subscription, self.request_id);
         self.request_id += 1;
 
         let mut writable = self.connection.lock().await;
@@ -264,13 +248,13 @@ impl Feed {
         book_subscription.depth = Some(self.depth);
 
         let mut book_subscription_message =
-            Message::new_subscription(book_subscription, self.request_id.clone());
+            Message::new_subscription(book_subscription, self.request_id);
         self.request_id += 1;
         book_subscription_message.method = "unsubscribe".to_string();
 
         let ticker_subscription = TickerSubscription::new(vec![ticker.clone()]);
         let mut ticker_subscription_message =
-            Message::new_subscription(ticker_subscription, self.request_id.clone());
+            Message::new_subscription(ticker_subscription, self.request_id);
         self.request_id += 1;
         ticker_subscription_message.method = "unsubscribe".to_string();
 
