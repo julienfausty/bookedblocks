@@ -45,6 +45,13 @@ impl Dispatch {
                         Err(message) => return Err(format!("{:?}", message)),
                     },
                 },
+                Action::UnsubscribeTicker(ticker) => match self.feed.unsubscribe(ticker).await {
+                    Ok(()) => (),
+                    Err(message) => match self.action_sender.send(Action::Warn(message)).await {
+                        Ok(_) => (),
+                        Err(message) => return Err(format!("{:?}", message)),
+                    },
+                },
                 Action::Quit => println!("Got quit action"),
                 Action::UpdateBook(update) => println!("{:?}", update),
                 Action::UpdateTicker(update) => println!("{:?}", update),
