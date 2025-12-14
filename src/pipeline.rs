@@ -7,7 +7,7 @@ use rbtree::RBTree;
 
 use std::cmp::Ordering;
 
-#[derive(Clone, PartialOrd, PartialEq)]
+#[derive(Clone, Debug, PartialOrd, PartialEq)]
 pub struct Price {
     pub value: f64,
 }
@@ -121,13 +121,16 @@ impl BookHistory {
         }
     }
 
-    pub async fn get_lastest_book(&self) -> (RBTree<Price, f64>, RBTree<Price, f64>) {
+    pub async fn get_latest_book(&self) -> ((i64, RBTree<Price, f64>), (i64, RBTree<Price, f64>)) {
         let readable_asks = self.asks.read().await;
         let readable_bids = self.bids.read().await;
 
         match (readable_asks.get_last(), readable_bids.get_last()) {
-            (Some((_, asks)), Some((_, bids))) => (asks.clone(), bids.clone()),
-            _ => (RBTree::new(), RBTree::new()),
+            (Some((time_ask, asks)), Some((time_bid, bids))) => (
+                (time_ask.clone(), asks.clone()),
+                (time_bid.clone(), bids.clone()),
+            ),
+            _ => ((0, RBTree::new()), (0, RBTree::new())),
         }
     }
 
@@ -175,5 +178,234 @@ impl BookHistory {
             asks: RwLock::new(extract(&readable_asks)),
             bids: RwLock::new(extract(&readable_bids)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    use chrono::DateTime;
+
+    fn generic_booked_case() -> Booked {
+        Booked {
+            symbol: "ETH/EUR".to_string(),
+            timestamp: DateTime::from_timestamp(0, 0).unwrap().to_rfc3339(),
+            asks: vec![
+                Order {
+                    price: 5.0,
+                    quantity: 6.0,
+                },
+                Order {
+                    price: 7.0,
+                    quantity: 8.0,
+                },
+            ],
+            bids: vec![
+                Order {
+                    price: 1.0,
+                    quantity: 2.0,
+                },
+                Order {
+                    price: 3.0,
+                    quantity: 4.0,
+                },
+            ],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_history() {
+        let history = BookHistory::new(60);
+
+        let latest = history.get_latest_book().await;
+        assert_eq!(latest.0.0, 0);
+        assert_eq!(latest.1.0, 0);
+
+        assert_eq!(latest.0.1.len(), 0);
+        assert_eq!(latest.1.1.len(), 0);
+
+        let integrated = history.integrate_window(0, 60).await;
+        assert_eq!(integrated.0.len(), 0);
+        assert_eq!(integrated.1.len(), 0);
+
+        let extracted = history.extract_window(0, 45).await;
+        assert_eq!(extracted.time_window_in_seconds, 45);
+
+        let readable_asks = extracted.asks.read().await;
+        let readable_bids = extracted.bids.read().await;
+        assert_eq!(readable_asks.len(), 0);
+        assert_eq!(readable_bids.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_book_updates() {
+        let mut history = BookHistory::new(60);
+
+        let updated = history.update(generic_booked_case()).await;
+        assert!(updated.is_ok());
+        assert!(!updated.unwrap().is_some());
+
+        let readable_asks = history.asks.read().await;
+        let readable_bids = history.bids.read().await;
+
+        assert_eq!(readable_asks.len(), 1);
+        assert_eq!(readable_bids.len(), 1);
+
+        let first_asks = readable_asks.get_first();
+        let first_bids = readable_bids.get_first();
+
+        assert!(first_asks.is_some());
+        assert!(first_bids.is_some());
+
+        let (asks_time, asks) = first_asks.unwrap();
+        let (bids_time, bids) = first_bids.unwrap();
+
+        assert_eq!(*asks_time, 0);
+        assert_eq!(*bids_time, 0);
+
+        assert_eq!(asks.len(), 2);
+        assert_eq!(bids.len(), 2);
+
+        itertools::assert_equal(
+            asks.clone().into_iter(),
+            vec![(Price { value: 5.0 }, 6.0), (Price { value: 7.0 }, 8.0)].into_iter(),
+        );
+
+        itertools::assert_equal(
+            bids.clone().into_iter(),
+            vec![(Price { value: 1.0 }, 2.0), (Price { value: 3.0 }, 4.0)].into_iter(),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bad_timestamped_update() {
+        let mut history = BookHistory::new(60);
+
+        let mut booked = generic_booked_case();
+        booked.timestamp = "Bad Timestamp".to_string();
+
+        let updated = history.update(booked).await;
+        assert!(updated.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_latest_book() {
+        let mut history = BookHistory::new(60);
+
+        let _ = history.update(generic_booked_case()).await;
+
+        let ((asks_time, asks), (bids_time, bids)) = history.get_latest_book().await;
+
+        assert_eq!(asks_time, 0);
+        assert_eq!(bids_time, 0);
+
+        assert_eq!(asks.len(), 2);
+        assert_eq!(bids.len(), 2);
+
+        itertools::assert_equal(
+            asks.clone().into_iter(),
+            vec![(Price { value: 5.0 }, 6.0), (Price { value: 7.0 }, 8.0)].into_iter(),
+        );
+
+        itertools::assert_equal(
+            bids.clone().into_iter(),
+            vec![(Price { value: 1.0 }, 2.0), (Price { value: 3.0 }, 4.0)].into_iter(),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_book_multiple_book_updates() {
+        let mut history = BookHistory::new(60);
+
+        let updated = history.update(generic_booked_case()).await;
+        assert!(updated.is_ok());
+        assert!(!updated.unwrap().is_some());
+
+        {
+            let readable_asks = history.asks.read().await;
+            let readable_bids = history.bids.read().await;
+
+            assert_eq!(readable_asks.len(), 1);
+            assert_eq!(readable_bids.len(), 1);
+        }
+
+        let mut booked = generic_booked_case();
+        booked.timestamp = DateTime::from_timestamp(60, 0).unwrap().to_rfc3339();
+        let updated = history.update(booked).await;
+        assert!(updated.is_ok());
+        assert!(!updated.unwrap().is_some());
+
+        {
+            let readable_asks = history.asks.read().await;
+            let readable_bids = history.bids.read().await;
+
+            assert_eq!(readable_asks.len(), 2);
+            assert_eq!(readable_bids.len(), 2);
+        }
+
+        let mut booked = generic_booked_case();
+        booked.timestamp = DateTime::from_timestamp(61, 0).unwrap().to_rfc3339();
+        let updated = history.update(booked).await;
+        assert!(updated.is_ok());
+        let updated_option = updated.unwrap();
+        assert!(updated_option.is_some());
+
+        let ((time_asks, _), (time_bids, _)) = updated_option.unwrap();
+        assert_eq!(time_asks, 0);
+        assert_eq!(time_bids, 0);
+
+        {
+            let readable_asks = history.asks.read().await;
+            let readable_bids = history.bids.read().await;
+
+            assert_eq!(readable_asks.len(), 2);
+            assert_eq!(readable_bids.len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_integrate_window() {
+        let mut history = BookHistory::new(60);
+
+        for i_time in 0..60 {
+            let mut booked = generic_booked_case();
+            booked.timestamp = DateTime::from_timestamp(i_time, 0).unwrap().to_rfc3339();
+            let updated = history.update(booked).await;
+            assert!(updated.is_ok());
+            assert!(!updated.unwrap().is_some());
+        }
+
+        let latest = history.get_latest_book().await;
+        assert_eq!(latest.0.0, 59);
+        assert_eq!(latest.1.0, 59);
+
+        let (integrated_asks, integrated_bids) = history.integrate_window(10, 40).await;
+
+        itertools::assert_equal(
+            integrated_asks.into_iter(),
+            (10..41).map(|time| (time, 14.0)),
+        );
+        itertools::assert_equal(
+            integrated_bids.into_iter(),
+            (10..41).map(|time| (time, 6.0)),
+        );
+
+        let extracted = history.extract_window(15, 35).await;
+
+        assert_eq!(extracted.time_window_in_seconds, 20);
+
+        let extracted_asks = extracted.asks.read().await;
+        let extracted_bids = extracted.bids.read().await;
+
+        itertools::assert_equal(
+            extracted_asks.clone().into_iter().map(|(time, _)| time),
+            15..36,
+        );
+        itertools::assert_equal(
+            extracted_bids.clone().into_iter().map(|(time, _)| time),
+            15..36,
+        );
     }
 }
