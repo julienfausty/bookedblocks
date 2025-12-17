@@ -2,10 +2,10 @@ use crate::feed::{Booked, Order};
 
 use tokio::sync::RwLock;
 
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use rbtree::RBTree;
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, max, min};
 
 #[derive(Clone, Debug, PartialOrd, PartialEq)]
 pub struct Price {
@@ -177,6 +177,83 @@ impl BookHistory {
             time_window_in_seconds: (end - start).abs() as usize,
             asks: RwLock::new(extract(&readable_asks)),
             bids: RwLock::new(extract(&readable_bids)),
+        }
+    }
+}
+
+pub struct RenderGrid {
+    number_time_values: usize,
+    time_range: (i64, i64),
+    number_price_values: usize,
+    price_range: (f64, f64),
+}
+
+pub struct GenerateGrid {
+    time_window_in_seconds: u64,
+    number_time_values: usize,
+    number_price_values: usize,
+}
+
+impl GenerateGrid {
+    pub async fn grid(&self, history: &BookHistory) -> RenderGrid {
+        let readable_asks = history.asks.read().await;
+        let readable_bids = history.bids.read().await;
+
+        let latest_time = match (readable_asks.get_last(), readable_bids.get_last()) {
+            (Some((time_asks, _)), Some((time_bids, _))) => max(time_asks, time_bids).clone(),
+            (Some((time_asks, _)), None) => time_asks.clone(),
+            (None, Some((time_bids, _))) => time_bids.clone(),
+            (None, None) => Utc::now().timestamp(),
+        };
+
+        let time_range = (
+            latest_time - (self.time_window_in_seconds as i64),
+            latest_time,
+        );
+
+        let minimal_bid = readable_bids
+            .iter()
+            .filter(|(time, _)| *time >= &time_range.0 || *time <= &time_range.1)
+            .map(|(_, prices)| {
+                prices
+                    .get_first()
+                    .and_then(|(price, _)| Some(price.clone()))
+                    .get_or_insert(Price { value: f64::MAX })
+                    .clone()
+            })
+            .fold(Price { value: f64::MAX }, |minimal, price| {
+                min(minimal, price.clone())
+            })
+            .value
+            .clone();
+
+        let minimal_bid = if minimal_bid == f64::MAX {
+            0.0
+        } else {
+            minimal_bid
+        };
+
+        let maximal_ask = readable_asks
+            .iter()
+            .filter(|(time, _)| *time >= &time_range.0 || *time <= &time_range.1)
+            .map(|(_, prices)| {
+                prices
+                    .get_last()
+                    .and_then(|(price, _)| Some(price.clone()))
+                    .get_or_insert(Price { value: 0.0 })
+                    .clone()
+            })
+            .fold(Price { value: 0.0 }, |maximal, price| {
+                min(maximal, price.clone())
+            })
+            .value
+            .clone();
+
+        RenderGrid {
+            number_time_values: self.number_time_values.clone(),
+            time_range: time_range,
+            number_price_values: self.number_price_values.clone(),
+            price_range: (minimal_bid, maximal_ask),
         }
     }
 }
