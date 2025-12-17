@@ -182,10 +182,10 @@ impl BookHistory {
 }
 
 pub struct RenderGrid {
-    number_time_values: usize,
-    time_range: (i64, i64),
-    number_price_values: usize,
-    price_range: (f64, f64),
+    pub number_time_values: usize,
+    pub time_range: (i64, i64),
+    pub number_price_values: usize,
+    pub price_range: (f64, f64),
 }
 
 pub struct GenerateGrid {
@@ -257,6 +257,25 @@ impl GenerateGrid {
         }
     }
 }
+
+pub struct SplattedDepth {
+    pub price_range: (f64, f64),
+    pub volumes: Vec<f64>,
+}
+
+pub struct SplatDepth {}
+
+pub struct SplattedVolumes {
+    pub time_range: (i64, i64),
+    pub ask_volumes: Vec<f64>,
+    pub bid_volumes: Vec<f64>,
+}
+
+pub struct SplatVolume {}
+
+pub struct SplattedBlocks {}
+
+pub struct SplatBlocks {}
 
 #[cfg(test)]
 mod tests {
