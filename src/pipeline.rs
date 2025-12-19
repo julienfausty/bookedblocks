@@ -1,5 +1,5 @@
 use crate::feed::{Booked, Order};
-use crate::splat::splat_1D;
+use crate::splat::splat_1d;
 
 use tokio::sync::RwLock;
 
@@ -274,7 +274,7 @@ impl SplatDepth {
     pub async fn splat(grid: &RenderGrid, history: &BookHistory) -> SplattedDepth {
         let ((_, latest_asks), (_, latest_bids)) = history.get_latest_book().await;
 
-        let ask_support = splat_1D(
+        let ask_support = splat_1d(
             &grid.price_range,
             grid.number_price_values,
             latest_asks
@@ -283,7 +283,7 @@ impl SplatDepth {
                 .collect(),
         );
 
-        let bid_support = splat_1D(
+        let bid_support = splat_1d(
             &grid.price_range,
             grid.number_price_values,
             latest_bids
