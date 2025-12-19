@@ -1,5 +1,5 @@
 use crate::feed::{Booked, Order};
-use crate::splat::splat_1d;
+use crate::splat::{splat_1d, splat_2d};
 
 use tokio::sync::RwLock;
 
@@ -349,6 +349,89 @@ pub struct SplattedBlocks {
 }
 
 pub struct SplatBlocks {}
+
+impl SplatBlocks {
+    pub async fn splat(grid: &RenderGrid, history: &BookHistory) -> SplattedBlocks {
+        let extract = history
+            .extract_window(grid.time_range.0, grid.time_range.1)
+            .await;
+
+        let mut source = Vec::new();
+        {
+            let readable_asks = extract.asks.read().await;
+            for (time, state) in readable_asks.iter() {
+                for (price, volume) in state.iter() {
+                    source.push((time.clone() as f64, price.value.clone(), volume.clone()));
+                }
+            }
+        }
+
+        let ask_support = splat_2d(
+            (
+                &(grid.time_range.0 as f64, grid.time_range.1 as f64),
+                &grid.price_range,
+            ),
+            (grid.number_time_values, grid.number_price_values),
+            source,
+        );
+
+        let mut source = Vec::new();
+        {
+            let readable_bids = extract.bids.read().await;
+            for (time, state) in readable_bids.iter() {
+                for (price, volume) in state.iter() {
+                    source.push((time.clone() as f64, price.value.clone(), volume.clone()));
+                }
+            }
+        }
+
+        let bid_support = splat_2d(
+            (
+                &(grid.time_range.0 as f64, grid.time_range.1 as f64),
+                &grid.price_range,
+            ),
+            (grid.number_time_values, grid.number_price_values),
+            source,
+        );
+
+        SplattedBlocks {
+            grid: grid.clone(),
+            volumes: ask_support - bid_support,
+        }
+    }
+}
+
+pub struct Pipeline {
+    grid_generator: GenerateGrid,
+}
+
+impl Pipeline {
+    pub async fn new(
+        time_window_in_seconds: u64,
+        number_time_values: usize,
+        number_price_values: usize,
+    ) -> Pipeline {
+        Pipeline {
+            grid_generator: GenerateGrid {
+                time_window_in_seconds,
+                number_time_values,
+                number_price_values,
+            },
+        }
+    }
+    pub async fn run(
+        &self,
+        history: &BookHistory,
+    ) -> (SplattedDepth, SplattedVolumes, SplattedBlocks) {
+        let grid = self.grid_generator.grid(history).await;
+
+        (
+            SplatDepth::splat(&grid, history).await,
+            SplatVolume::splat(&grid, history).await,
+            SplatBlocks::splat(&grid, history).await,
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {
