@@ -1,4 +1,4 @@
-use ndarray::{Array2, s};
+use ndarray::Array2;
 
 fn gaussian_kernel_1d(value: f64, deviation: &f64, mean: &f64) -> f64 {
     (1.0 / (deviation * (2.0 * std::f64::consts::PI).sqrt()))
@@ -67,7 +67,7 @@ pub fn splat_2d(
         return support;
     }
 
-    if ranges.0.0 == ranges.0.1 || ranges.1.0 == ranges.1.1 {
+    if (ranges.0.0 == ranges.0.1) || (ranges.1.0 == ranges.1.1) {
         support += 1.0;
         return support;
     }
@@ -122,7 +122,7 @@ pub fn splat_2d(
     for (key0, key1, value) in source.into_iter() {
         let splat_extents = influence((key0, key1));
 
-        for index0 in (splat_extents.0.1)..(splat_extents.0.1) {
+        for index0 in (splat_extents.0.0)..(splat_extents.0.1) {
             for index1 in (splat_extents.1.0)..(splat_extents.1.1) {
                 match support.get_mut((index0 as usize, index1 as usize)) {
                     Some(val) => {
@@ -222,6 +222,125 @@ mod tests {
 
         for i_grid in 0..50 {
             assert!((splatted[i_grid] - kernel((i_grid as f64) / 50.0)).abs() < TOLERANCE);
+        }
+    }
+
+    #[test]
+    fn test_splat_2d_empty_source() {
+        let splatted = splat_2d((&(0.0, 1.0), &(0.0, 1.0)), (20, 10), Vec::new());
+
+        assert!(splatted.shape()[0] == 20);
+        assert!(splatted.shape()[1] == 10);
+
+        for splat_val in splatted.into_iter() {
+            assert!(splat_val == 0.0);
+        }
+    }
+
+    #[test]
+    fn test_splat_2d_compact_horizontal_range() {
+        let splatted = splat_2d((&(0.0, 0.0), &(0.0, 1.0)), (20, 10), vec![(0.0, 0.0, 0.0)]);
+
+        assert!(splatted.shape()[0] == 20);
+        assert!(splatted.shape()[1] == 10);
+
+        for splat_val in splatted.into_iter() {
+            assert!(splat_val == 1.0);
+        }
+    }
+
+    #[test]
+    fn test_splat_2d_compact_vertical_range() {
+        let splatted = splat_2d((&(0.0, 1.0), &(1.0, 1.0)), (20, 10), vec![(0.0, 0.0, 0.0)]);
+
+        assert!(splatted.shape()[0] == 20);
+        assert!(splatted.shape()[1] == 10);
+
+        for splat_val in splatted.into_iter() {
+            assert!(splat_val == 1.0);
+        }
+    }
+
+    #[test]
+    fn test_splat_2d_one_source() {
+        let splatted = splat_2d((&(0.0, 1.0), &(0.0, 1.0)), (10, 20), vec![(0.5, 0.5, 1.0)]);
+
+        assert!(splatted.shape()[0] == 10);
+        assert!(splatted.shape()[1] == 20);
+
+        for i_grid in 0..10 {
+            for j_grid in 0..20 {
+                assert!(
+                    (splatted.get((i_grid, j_grid)).unwrap()
+                        - gaussian_kernel_2d(
+                            (i_grid as f64 / 10.0, j_grid as f64 / 20.0),
+                            &(0.5, 0.5),
+                            &(0.5, 0.5)
+                        ))
+                    .abs()
+                        < TOLERANCE
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_splat_2d_volume() {
+        let splatted = splat_2d((&(1.0, 2.0), &(1.0, 2.0)), (10, 20), vec![(1.5, 1.5, 0.25)]);
+
+        assert!(splatted.shape()[0] == 10);
+        assert!(splatted.shape()[1] == 20);
+
+        for i_grid in 0..10 {
+            for j_grid in 0..20 {
+                assert!(
+                    (splatted.get((i_grid, j_grid)).unwrap()
+                        - 0.25
+                            * gaussian_kernel_2d(
+                                (i_grid as f64 / 10.0, j_grid as f64 / 20.0),
+                                &(0.5, 0.5),
+                                &(0.5, 0.5)
+                            ))
+                    .abs()
+                        < TOLERANCE
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_splat_2d_multiple_sources() {
+        let splatted = splat_2d(
+            (&(1.0, 2.0), &(-1.0, 0.0)),
+            (10, 20),
+            vec![
+                (1.0, -1.0, 1.2),
+                (1.5, -0.5, 0.25),
+                (1.5, 0.0, 0.7),
+                (2.0, 0.0, 1.4),
+            ],
+        );
+
+        assert!(splatted.shape()[0] == 10);
+        assert!(splatted.shape()[1] == 20);
+
+        let deviation = 0.25;
+        let kernel = |grid_point: (f64, f64)| -> f64 {
+            1.2 * gaussian_kernel_2d(grid_point, &(deviation, deviation), &(0.0, 0.0))
+                + 0.25 * gaussian_kernel_2d(grid_point, &(deviation, deviation), &(0.5, 0.5))
+                + 0.7 * gaussian_kernel_2d(grid_point, &(deviation, deviation), &(0.5, 1.0))
+                + 1.4 * gaussian_kernel_2d(grid_point, &(deviation, deviation), &(1.0, 1.0))
+        };
+
+        for i_grid in 0..10 {
+            for j_grid in 0..20 {
+                assert!(
+                    (splatted.get((i_grid, j_grid)).unwrap()
+                        - kernel((i_grid as f64 / 10.0, j_grid as f64 / 20.0)))
+                    .abs()
+                        < TOLERANCE
+                );
+            }
         }
     }
 }
