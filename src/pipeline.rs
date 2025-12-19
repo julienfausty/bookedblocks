@@ -1,4 +1,5 @@
 use crate::feed::{Booked, Order};
+use crate::splat::splat_1D;
 
 use tokio::sync::RwLock;
 
@@ -7,6 +8,7 @@ use ndarray::Array2;
 use rbtree::RBTree;
 
 use std::cmp::{Ordering, max, min};
+use std::iter::zip;
 
 #[derive(Clone, Debug, PartialOrd, PartialEq)]
 pub struct Price {
@@ -269,84 +271,32 @@ pub struct SplattedDepth {
 pub struct SplatDepth {}
 
 impl SplatDepth {
-    fn kernel(price: f64, deviation: &f64, mean: &f64) -> f64 {
-        (-(price - mean).powi(2) / deviation.powi(2)).exp()
-    }
-
     pub async fn splat(grid: &RenderGrid, history: &BookHistory) -> SplattedDepth {
-        let mut volumes = Vec::with_capacity(grid.number_price_values);
-
-        if grid.price_range.0 == grid.price_range.1 {
-            volumes.fill(1.0);
-            return SplattedDepth {
-                price_range: grid.price_range.clone(),
-                volumes: volumes,
-            };
-        }
-
         let ((_, latest_asks), (_, latest_bids)) = history.get_latest_book().await;
 
-        if latest_asks.is_empty() && latest_bids.is_empty() {
-            return SplattedDepth {
-                price_range: grid.price_range.clone(),
-                volumes: volumes,
-            };
-        }
+        let ask_support = splat_1D(
+            &grid.price_range,
+            grid.number_price_values,
+            latest_asks
+                .into_iter()
+                .map(|(price, volume)| (price.value, volume))
+                .collect(),
+        );
 
-        volumes.fill(0.0);
-
-        let deviation =
-            (grid.number_price_values as f64) / ((latest_asks.len() + latest_asks.len()) as f64);
-
-        let price_step =
-            (grid.price_range.1 - grid.price_range.0) / (grid.number_price_values as f64);
-
-        let price_extent = (2.0 * deviation / price_step).round() as i64;
-        let influence = |price: f64| {
-            let grid_point = ((price - grid.price_range.0) / price_step).round() as i64;
-            let mut extent = (grid_point - price_extent, grid_point + price_extent + 1);
-            if extent.0 < 0 {
-                extent.0 = 0;
-            }
-            if extent.1 > grid.number_price_values as i64 {
-                extent.1 = grid.number_price_values as i64;
-            }
-            extent
-        };
-
-        for (price, volume) in latest_asks.iter() {
-            let splat_extent = influence(price.value.clone());
-
-            let _ = ((splat_extent.0)..(splat_extent.1))
-                .map(|index| {
-                    volumes[index as usize] += volume
-                        * SplatDepth::kernel(
-                            price_step * (index as f64) + grid.price_range.0,
-                            &deviation,
-                            &price.value,
-                        )
-                })
-                .collect::<Vec<_>>();
-        }
-
-        for (price, volume) in latest_bids.iter() {
-            let splat_extent = influence(price.value.clone());
-
-            let _ = ((splat_extent.0)..(splat_extent.1))
-                .map(|index| {
-                    volumes[index as usize] -= volume
-                        * SplatDepth::kernel(
-                            price_step * (index as f64) + grid.price_range.0,
-                            &deviation,
-                            &price.value,
-                        )
-                })
-                .collect::<Vec<_>>();
-        }
+        let bid_support = splat_1D(
+            &grid.price_range,
+            grid.number_price_values,
+            latest_bids
+                .into_iter()
+                .map(|(price, volume)| (price.value, volume))
+                .collect(),
+        );
 
         SplattedDepth {
             price_range: grid.price_range.clone(),
-            volumes: volumes,
+            volumes: zip(ask_support, bid_support)
+                .map(|(ask, bid)| ask - bid)
+                .collect(),
         }
     }
 }

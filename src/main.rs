@@ -12,6 +12,8 @@ use feed::{Feed, TickerState};
 mod pipeline;
 use pipeline::BookHistory;
 
+mod splat;
+
 struct BooksCache {
     time_cache_window_seconds: usize,
     cache: HashMap<String, BookHistory>,
