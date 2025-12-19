@@ -6,6 +6,8 @@ pub enum Action {
     Launch,
     SubscribeTicker(String),
     Quit,
+    RunPipeline(String),
+    UnsubscribeTicker(String),
     UpdateBook(Booked),
     UpdateTicker(TickerState),
     Warn(String),

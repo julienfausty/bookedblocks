@@ -1,16 +1,41 @@
 use tokio;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
+use std::collections::HashMap;
+
 mod actions;
 use actions::Action;
 
 mod feed;
-use feed::Feed;
+use feed::{Feed, TickerState};
+
+mod pipeline;
+use pipeline::{BookHistory, Pipeline, SplattedBlocks, SplattedDepth, SplattedVolumes};
+
+mod splat;
+
+struct BooksCache {
+    time_cache_window_seconds: usize,
+    cache: HashMap<String, BookHistory>,
+}
+
+impl BooksCache {
+    pub fn new(time_cache_window_seconds: usize) -> BooksCache {
+        BooksCache {
+            time_cache_window_seconds,
+            cache: HashMap::new(),
+        }
+    }
+}
 
 struct Dispatch {
     action_receiver: Receiver<Action>,
     action_sender: Sender<Action>,
     feed: Feed,
+    tickers: HashMap<String, Option<TickerState>>,
+    books: BooksCache,
+    pipeline: Pipeline,
+    buffers: HashMap<String, Option<(SplattedDepth, SplattedVolumes, SplattedBlocks)>>,
 }
 
 impl Dispatch {
@@ -18,6 +43,10 @@ impl Dispatch {
         buffer_size: usize,
         websocket_timeout_seconds: u64,
         book_depth: i32,
+        time_cache_window_seconds: usize,
+        time_visual_window_seconds: u64,
+        time_resolution: usize,
+        price_resolution: usize,
     ) -> Result<Dispatch, String> {
         let (sender, receiver) = channel::<Action>(buffer_size);
 
@@ -30,6 +59,14 @@ impl Dispatch {
             action_receiver: receiver,
             action_sender: sender,
             feed,
+            tickers: HashMap::new(),
+            books: BooksCache::new(time_cache_window_seconds),
+            pipeline: Pipeline::new(
+                time_visual_window_seconds,
+                time_resolution,
+                price_resolution,
+            ),
+            buffers: HashMap::new(),
         })
     }
 
@@ -38,16 +75,82 @@ impl Dispatch {
             match action {
                 Action::Inform(message) => println!("{}", message),
                 Action::Launch => println!("Got launch action"),
-                Action::SubscribeTicker(ticker) => match self.feed.subscribe(ticker).await {
-                    Ok(()) => (),
-                    Err(message) => match self.action_sender.send(Action::Warn(message)).await {
+                Action::SubscribeTicker(ticker) => {
+                    self.tickers.insert(ticker.clone(), None);
+                    self.books.cache.insert(
+                        ticker.clone(),
+                        BookHistory::new(self.books.time_cache_window_seconds.clone()),
+                    );
+                    self.buffers.insert(ticker.clone(), None);
+
+                    match self.feed.subscribe(ticker).await {
+                        Ok(()) => (),
+                        Err(message) => {
+                            match self.action_sender.send(Action::Warn(message)).await {
+                                Ok(_) => (),
+                                Err(message) => return Err(format!("{:?}", message)),
+                            }
+                        }
+                    }
+                }
+                Action::RunPipeline(ticker) => match self.books.cache.get(&ticker) {
+                    Some(history) => {
+                        self.buffers
+                            .insert(ticker, Some(self.pipeline.run(history).await));
+                    }
+                    None => (),
+                },
+                Action::UnsubscribeTicker(ticker) => {
+                    match self.feed.unsubscribe(ticker.clone()).await {
+                        Ok(()) => (),
+                        Err(message) => {
+                            match self.action_sender.send(Action::Warn(message)).await {
+                                Ok(_) => (),
+                                Err(message) => return Err(format!("{:?}", message)),
+                            }
+                        }
+                    }
+
+                    self.tickers.remove(&ticker);
+                    self.books.cache.remove(&ticker);
+                    self.buffers.remove(&ticker);
+                }
+                Action::Quit => println!("Got quit action"),
+                Action::UpdateBook(update) => {
+                    let symbol = update.symbol.clone();
+                    match self.books.cache.get_mut(&symbol) {
+                        Some(history) => {
+                            history.update(update).await?;
+                        }
+                        None => {
+                            return Err(format!(
+                                "Got book update for {} while symbol was absent from cache.",
+                                symbol
+                            ));
+                        }
+                    }
+
+                    match self
+                        .action_sender
+                        .send(Action::RunPipeline(symbol.clone()))
+                        .await
+                    {
                         Ok(_) => (),
                         Err(message) => return Err(format!("{:?}", message)),
-                    },
-                },
-                Action::Quit => println!("Got quit action"),
-                Action::UpdateBook(update) => println!("{:?}", update),
-                Action::UpdateTicker(update) => println!("{:?}", update),
+                    }
+                }
+                Action::UpdateTicker(update) => {
+                    let symbol = update.symbol.clone();
+                    match self.tickers.insert(symbol.clone(), Some(update)) {
+                        Some(_) => (),
+                        None => {
+                            return Err(format!(
+                                "Got ticker update for {} while symbol was absent from cache.",
+                                symbol
+                            ));
+                        }
+                    }
+                }
                 Action::Warn(message) => eprintln!("{}", message),
             }
         }
@@ -61,7 +164,7 @@ impl Dispatch {
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let mut dispatch = match Dispatch::new(100, 200, 100).await {
+    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 108, 72).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };
