@@ -1,6 +1,8 @@
-fn gaussian_kernel_1d(price: f64, deviation: &f64, mean: &f64) -> f64 {
+use ndarray::{Array2, s};
+
+fn gaussian_kernel_1d(value: f64, deviation: &f64, mean: &f64) -> f64 {
     (1.0 / (deviation * (2.0 * std::f64::consts::PI).sqrt()))
-        * (-(price - mean).powi(2) / deviation.powi(2)).exp()
+        * (-(value - mean).powi(2) / (2.0 * deviation.powi(2))).exp()
 }
 
 pub fn splat_1d(range: &(f64, f64), grid_size: usize, source: Vec<(f64, f64)>) -> Vec<f64> {
@@ -18,7 +20,7 @@ pub fn splat_1d(range: &(f64, f64), grid_size: usize, source: Vec<(f64, f64)>) -
     let grid_size = support.len().clone();
     let deviation = (range.1 - range.0) / (2.0 * source.len() as f64);
     let step = (range.1 - range.0) / (grid_size as f64);
-    let kernel_bloom = (2.5 * deviation / step).round() as i64;
+    let kernel_bloom = (5.0 * deviation / step).round() as i64;
 
     let influence = |value: f64| {
         let grid_point = ((value - range.0) / step).round() as i64;
@@ -41,6 +43,103 @@ pub fn splat_1d(range: &(f64, f64), grid_size: usize, source: Vec<(f64, f64)>) -
                     value * gaussian_kernel_1d(step * (index as f64) + range.0, &deviation, &key)
             })
             .collect::<Vec<_>>();
+    }
+
+    support
+}
+
+fn gaussian_kernel_2d(values: (f64, f64), deviations: &(f64, f64), means: &(f64, f64)) -> f64 {
+    (1.0 / (deviations.0 * deviations.1 * 2.0 * std::f64::consts::PI))
+        * ((-1.0 / 2.0)
+            * (((values.0 - means.0) / deviations.0).powi(2)
+                + ((values.1 - means.1) / deviations.1).powi(2)))
+        .exp()
+}
+
+pub fn splat_2d(
+    ranges: (&(f64, f64), &(f64, f64)),
+    grid_sizes: (usize, usize),
+    source: Vec<(f64, f64, f64)>,
+) -> Array2<f64> {
+    let mut support = Array2::zeros(grid_sizes);
+
+    if source.len() == 0 {
+        return support;
+    }
+
+    if ranges.0.0 == ranges.0.1 || ranges.1.0 == ranges.1.1 {
+        support += 1.0;
+        return support;
+    }
+
+    let grid_sizes = (support.shape()[0].clone(), support.shape()[1].clone());
+    let deviations = (
+        (ranges.0.1 - ranges.0.0) / (2.0 * (source.len() as f64).sqrt()),
+        (ranges.1.1 - ranges.1.0) / (2.0 * (source.len() as f64).sqrt()),
+    );
+    let steps = (
+        (ranges.0.1 - ranges.0.0) / (grid_sizes.0 as f64),
+        (ranges.1.1 - ranges.1.0) / (grid_sizes.1 as f64),
+    );
+    let kernel_blooms = (
+        (5.0 * deviations.0 / steps.0).round() as i64,
+        (5.0 * deviations.1 / steps.1).round() as i64,
+    );
+
+    let influence = |value: (f64, f64)| {
+        let grid_point = (
+            ((value.0 - ranges.0.0) / steps.0).round() as i64,
+            ((value.1 - ranges.1.0) / steps.1).round() as i64,
+        );
+        let mut extents = (
+            (
+                grid_point.0 - kernel_blooms.0,
+                grid_point.0 + kernel_blooms.0 + 1,
+            ),
+            (
+                grid_point.1 - kernel_blooms.1,
+                grid_point.1 + kernel_blooms.1 + 1,
+            ),
+        );
+
+        if extents.0.0 < 0 {
+            extents.0.0 = 0;
+        }
+        if extents.1.0 < 0 {
+            extents.1.0 = 0;
+        }
+
+        if extents.0.1 > grid_sizes.0 as i64 {
+            extents.0.1 = grid_sizes.0 as i64;
+        }
+        if extents.1.1 > grid_sizes.1 as i64 {
+            extents.1.1 = grid_sizes.1 as i64;
+        }
+
+        extents
+    };
+
+    for (key0, key1, value) in source.into_iter() {
+        let splat_extents = influence((key0, key1));
+
+        for index0 in (splat_extents.0.1)..(splat_extents.0.1) {
+            for index1 in (splat_extents.1.0)..(splat_extents.1.1) {
+                match support.get_mut((index0 as usize, index1 as usize)) {
+                    Some(val) => {
+                        *val += value
+                            * gaussian_kernel_2d(
+                                (
+                                    steps.0 * (index0 as f64) + ranges.0.0,
+                                    steps.1 * (index1 as f64) + ranges.1.0,
+                                ),
+                                &deviations,
+                                &(key0, key1),
+                            )
+                    }
+                    None => (),
+                }
+            }
+        }
     }
 
     support
