@@ -10,7 +10,7 @@ mod feed;
 use feed::{Feed, TickerState};
 
 mod pipeline;
-use pipeline::BookHistory;
+use pipeline::{BookHistory, Pipeline, SplattedBlocks, SplattedDepth, SplattedVolumes};
 
 mod splat;
 
@@ -34,6 +34,8 @@ struct Dispatch {
     feed: Feed,
     tickers: HashMap<String, Option<TickerState>>,
     books: BooksCache,
+    pipeline: Pipeline,
+    buffers: HashMap<String, Option<(SplattedDepth, SplattedVolumes, SplattedBlocks)>>,
 }
 
 impl Dispatch {
@@ -42,6 +44,9 @@ impl Dispatch {
         websocket_timeout_seconds: u64,
         book_depth: i32,
         time_cache_window_seconds: usize,
+        time_visual_window_seconds: u64,
+        time_resolution: usize,
+        price_resolution: usize,
     ) -> Result<Dispatch, String> {
         let (sender, receiver) = channel::<Action>(buffer_size);
 
@@ -56,6 +61,12 @@ impl Dispatch {
             feed,
             tickers: HashMap::new(),
             books: BooksCache::new(time_cache_window_seconds),
+            pipeline: Pipeline::new(
+                time_visual_window_seconds,
+                time_resolution,
+                price_resolution,
+            ),
+            buffers: HashMap::new(),
         })
     }
 
@@ -70,6 +81,7 @@ impl Dispatch {
                         ticker.clone(),
                         BookHistory::new(self.books.time_cache_window_seconds.clone()),
                     );
+                    self.buffers.insert(ticker.clone(), None);
 
                     match self.feed.subscribe(ticker).await {
                         Ok(()) => (),
@@ -81,6 +93,13 @@ impl Dispatch {
                         }
                     }
                 }
+                Action::RunPipeline(ticker) => match self.books.cache.get(&ticker) {
+                    Some(history) => {
+                        self.buffers
+                            .insert(ticker, Some(self.pipeline.run(history).await));
+                    }
+                    None => (),
+                },
                 Action::UnsubscribeTicker(ticker) => {
                     match self.feed.unsubscribe(ticker.clone()).await {
                         Ok(()) => (),
@@ -94,6 +113,7 @@ impl Dispatch {
 
                     self.tickers.remove(&ticker);
                     self.books.cache.remove(&ticker);
+                    self.buffers.remove(&ticker);
                 }
                 Action::Quit => println!("Got quit action"),
                 Action::UpdateBook(update) => {
@@ -108,6 +128,15 @@ impl Dispatch {
                                 symbol
                             ));
                         }
+                    }
+
+                    match self
+                        .action_sender
+                        .send(Action::RunPipeline(symbol.clone()))
+                        .await
+                    {
+                        Ok(_) => (),
+                        Err(message) => return Err(format!("{:?}", message)),
                     }
                 }
                 Action::UpdateTicker(update) => {
@@ -135,7 +164,7 @@ impl Dispatch {
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let mut dispatch = match Dispatch::new(100, 200, 100, 60 * 60).await {
+    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 108, 72).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };

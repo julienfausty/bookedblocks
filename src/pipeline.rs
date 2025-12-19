@@ -406,7 +406,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub async fn new(
+    pub fn new(
         time_window_in_seconds: u64,
         number_time_values: usize,
         number_price_values: usize,
