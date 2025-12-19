@@ -310,6 +310,38 @@ pub struct SplattedVolumes {
 
 pub struct SplatVolume {}
 
+impl SplatVolume {
+    pub async fn splat(grid: &RenderGrid, history: &BookHistory) -> SplattedVolumes {
+        let (ask_volumes, bid_volumes) = history
+            .integrate_window(grid.time_range.0, grid.time_range.1)
+            .await;
+
+        let ask_support = splat_1d(
+            &(grid.time_range.0 as f64, grid.time_range.1 as f64),
+            grid.number_time_values,
+            ask_volumes
+                .into_iter()
+                .map(|(time, volume)| (time as f64, volume))
+                .collect(),
+        );
+
+        let bid_support = splat_1d(
+            &(grid.time_range.0 as f64, grid.time_range.1 as f64),
+            grid.number_time_values,
+            bid_volumes
+                .into_iter()
+                .map(|(time, volume)| (time as f64, volume))
+                .collect(),
+        );
+
+        SplattedVolumes {
+            time_range: grid.time_range.clone(),
+            ask_volumes: ask_support,
+            bid_volumes: bid_support,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SplattedBlocks {
     pub grid: RenderGrid,
