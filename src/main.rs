@@ -13,7 +13,7 @@ mod feed;
 use feed::{Feed, TickerState};
 
 mod pipeline;
-use pipeline::{BookHistory, Pipeline, SplattedBlocks, SplattedDepth, SplattedVolumes};
+use pipeline::{BookHistory, Pipeline};
 
 mod splat;
 
@@ -38,7 +38,7 @@ struct Dispatch {
     tickers: HashMap<String, Option<TickerState>>,
     books: BooksCache,
     pipeline: Pipeline,
-    app: Option<App>,
+    app: App,
 }
 
 impl Dispatch {
@@ -60,7 +60,7 @@ impl Dispatch {
 
         Ok(Dispatch {
             action_receiver: receiver,
-            action_sender: sender,
+            action_sender: sender.clone(),
             feed,
             tickers: HashMap::new(),
             books: BooksCache::new(time_cache_window_seconds),
@@ -69,7 +69,7 @@ impl Dispatch {
                 time_resolution,
                 price_resolution,
             ),
-            app: None,
+            app: App::new(sender.clone()).await,
         })
     }
 
@@ -77,13 +77,13 @@ impl Dispatch {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
                 Action::Inform(message) => (), // TODO: setup logs
-                Action::Launch => self.app = Some(App::new(self.sender()).await),
                 Action::SubscribeTicker(ticker) => {
                     self.tickers.insert(ticker.clone(), None);
                     self.books.cache.insert(
                         ticker.clone(),
                         BookHistory::new(self.books.time_cache_window_seconds.clone()),
                     );
+                    self.app.set_current_ticker(ticker.clone()).await;
 
                     match self.feed.subscribe(ticker).await {
                         Ok(()) => (),
@@ -96,10 +96,10 @@ impl Dispatch {
                     }
                 }
                 Action::RunPipeline(ticker) => match self.books.cache.get(&ticker) {
-                    Some(history) => match &self.app {
-                        Some(app) => app.update_splats(self.pipeline.run(history).await).await,
-                        None => (),
-                    },
+                    Some(history) => {
+                        let buffer = self.pipeline.run(history).await;
+                        self.app.update_splats(buffer).await
+                    }
                     None => (),
                 },
                 Action::UnsubscribeTicker(ticker) => {
@@ -173,11 +173,6 @@ async fn main() -> Result<(), String> {
     let sender = dispatch.sender();
 
     let running = dispatch.run();
-
-    match sender.send(Action::Launch).await {
-        Ok(_) => (),
-        Err(message) => return Err(format!("{:?}", message)),
-    };
 
     match sender
         .send(Action::SubscribeTicker("ETH/EUR".to_string()))

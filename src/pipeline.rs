@@ -66,6 +66,7 @@ fn update_books(
     }
 }
 
+#[derive(Debug)]
 pub struct BookHistory {
     pub time_window_in_seconds: usize,
     pub asks: RwLock<RBTree<i64, RBTree<Price, f64>>>,
@@ -248,7 +249,7 @@ impl GenerateGrid {
                     .clone()
             })
             .fold(Price { value: 0.0 }, |maximal, price| {
-                min(maximal, price.clone())
+                max(maximal, price.clone())
             })
             .value
             .clone();
@@ -273,7 +274,6 @@ pub struct SplatDepth {}
 impl SplatDepth {
     pub async fn splat(grid: &RenderGrid, history: &BookHistory) -> SplattedDepth {
         let ((_, latest_asks), (_, latest_bids)) = history.get_latest_book().await;
-
         let ask_support = splat_1d(
             &grid.price_range,
             grid.number_price_values,

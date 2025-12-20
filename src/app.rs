@@ -3,8 +3,10 @@ use crate::pipeline::{SplattedBlocks, SplattedDepth, SplattedVolumes};
 
 use crossterm::event::{self, Event};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
-use ratatui::widgets::{Block, Tabs};
+use ratatui::layout::{Alignment, Constraint, Layout};
+use ratatui::style::Stylize;
+use ratatui::symbols;
+use ratatui::widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph};
 
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
@@ -40,7 +42,7 @@ pub struct App {
 impl App {
     pub async fn new(sender: Sender<Action>) -> App {
         let state = Arc::new(Mutex::new(State {
-            page: Page::Search,
+            page: Page::Ticker,
             sender: sender.clone(),
             tickers: None,
             current_ticker: None,
@@ -60,6 +62,11 @@ impl App {
             pipeline_request_loop,
             state,
         }
+    }
+
+    pub async fn set_current_ticker(&self, ticker: String) {
+        let mut locked_state = self.state.lock().await;
+        locked_state.current_ticker = Some(ticker.clone());
     }
 
     pub async fn update_splats(&self, splats: (SplattedDepth, SplattedVolumes, SplattedBlocks)) {
@@ -146,17 +153,126 @@ impl App {
 
                 frame.render_widget(Block::bordered().title("Search"), hchunks[1]);
             }
-            Page::Ticker => match (state.tickers.clone(), state.current_ticker.clone()) {
-                (Some(tickers), Some(current)) => {
-                    let tab_index = match tickers.iter().position(|ticker| *ticker == current) {
-                        Some(found) => found,
-                        None => 0,
-                    };
-                    let tabs = Tabs::new(tickers).select(tab_index);
+            Page::Ticker => match state.current_ticker {
+                Some(symbol) => {
+                    let vchunks = Layout::vertical(vec![
+                        Constraint::Percentage(2),
+                        Constraint::Percentage(96),
+                        Constraint::Percentage(2),
+                    ])
+                    .split(frame.area());
 
-                    frame.render_widget(tabs, frame.area());
+                    let hchunks = Layout::horizontal(vec![
+                        Constraint::Percentage(2),
+                        Constraint::Percentage(96),
+                        Constraint::Percentage(2),
+                    ])
+                    .split(vchunks[1]);
+
+                    let ticker_block = Block::bordered().title(symbol.clone());
+                    frame.render_widget(ticker_block, hchunks[1]);
+
+                    let data_chunk = Layout::vertical(vec![
+                        Constraint::Percentage(2),
+                        Constraint::Percentage(96),
+                        Constraint::Percentage(2),
+                    ])
+                    .split(
+                        Layout::horizontal(vec![
+                            Constraint::Percentage(2),
+                            Constraint::Percentage(96),
+                            Constraint::Percentage(2),
+                        ])
+                        .split(hchunks[1])[1],
+                    )[1];
+
+                    let vertical_data_chunks = Layout::vertical(vec![
+                        Constraint::Percentage(65),
+                        Constraint::Percentage(10),
+                        Constraint::Percentage(25),
+                    ])
+                    .split(data_chunk);
+
+                    let top_data_chunks = Layout::horizontal(vec![
+                        Constraint::Percentage(65),
+                        Constraint::Percentage(10),
+                        Constraint::Percentage(25),
+                    ])
+                    .split(vertical_data_chunks[0]);
+
+                    let bottom_data_chunks = Layout::horizontal(vec![
+                        Constraint::Percentage(65),
+                        Constraint::Percentage(10),
+                        Constraint::Percentage(25),
+                    ])
+                    .split(vertical_data_chunks[2]);
+
+                    match state.depth {
+                        Some(splatted) => {
+                            let x_axis = Axis::default()
+                                .title("Price")
+                                .bounds([splatted.price_range.0, splatted.price_range.1])
+                                .labels([
+                                    format!("{:}", splatted.price_range.0),
+                                    format!(
+                                        "{:}",
+                                        (splatted.price_range.0 + splatted.price_range.1) / 2.0
+                                    ),
+                                    format!("{:}", splatted.price_range.1),
+                                ]);
+
+                            let max_vol = splatted.volumes.iter().fold(f64::MIN, |acc, volume| {
+                                if acc < *volume { volume.clone() } else { acc }
+                            });
+                            let min_vol = splatted.volumes.iter().fold(f64::MAX, |acc, volume| {
+                                if acc > *volume { volume.clone() } else { acc }
+                            });
+                            let y_axis = Axis::default()
+                                .title("Volumes")
+                                .bounds([min_vol, max_vol])
+                                .labels([
+                                    format!("{:}", min_vol),
+                                    format!("{:}", (min_vol + max_vol) / 2.0),
+                                    format!("{:}", max_vol),
+                                ]);
+
+                            let step = (splatted.price_range.1 - splatted.price_range.0)
+                                / (splatted.volumes.len() as f64);
+                            let graph = splatted
+                                .volumes
+                                .clone()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, vol)| {
+                                    (((index as f64) * step) + splatted.price_range.0, vol)
+                                })
+                                .collect::<Vec<_>>();
+
+                            let depth_dataset = Dataset::default()
+                                .name("Depth")
+                                .data(&graph)
+                                .marker(symbols::Marker::HalfBlock)
+                                .graph_type(GraphType::Bar)
+                                .green();
+
+                            let depth_widget = Chart::new(vec![depth_dataset])
+                                .block(Block::bordered().title("Depth"))
+                                .x_axis(x_axis)
+                                .y_axis(y_axis);
+                            frame.render_widget(depth_widget, top_data_chunks[2]);
+                        }
+                        None => {
+                            frame.render_widget(
+                                Paragraph::new("Loading...").alignment(Alignment::Center),
+                                top_data_chunks[2],
+                            );
+                        }
+                    }
                 }
-                _ => (),
+                None => frame.render_widget(
+                    Paragraph::new("Loading...").alignment(Alignment::Center),
+                    frame.area(),
+                ),
             },
             Page::Logs => (),
         };
