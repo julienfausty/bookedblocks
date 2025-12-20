@@ -6,6 +6,9 @@ use std::collections::HashMap;
 mod actions;
 use actions::Action;
 
+mod app;
+use app::App;
+
 mod feed;
 use feed::{Feed, TickerState};
 
@@ -36,6 +39,7 @@ struct Dispatch {
     books: BooksCache,
     pipeline: Pipeline,
     buffers: HashMap<String, Option<(SplattedDepth, SplattedVolumes, SplattedBlocks)>>,
+    app: Option<App>,
 }
 
 impl Dispatch {
@@ -67,6 +71,7 @@ impl Dispatch {
                 price_resolution,
             ),
             buffers: HashMap::new(),
+            app: None,
         })
     }
 
@@ -74,7 +79,7 @@ impl Dispatch {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
                 Action::Inform(message) => println!("{}", message),
-                Action::Launch => println!("Got launch action"),
+                Action::Launch => self.app = Some(App::new().await),
                 Action::SubscribeTicker(ticker) => {
                     self.tickers.insert(ticker.clone(), None);
                     self.books.cache.insert(
