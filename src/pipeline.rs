@@ -193,6 +193,7 @@ pub struct RenderGrid {
     pub price_range: (f64, f64),
 }
 
+#[derive(Clone, Debug)]
 pub struct GenerateGrid {
     time_window_in_seconds: u64,
     number_time_values: usize,
@@ -401,6 +402,7 @@ impl SplatBlocks {
     }
 }
 
+#[derive(Clone)]
 pub struct Pipeline {
     grid_generator: GenerateGrid,
 }

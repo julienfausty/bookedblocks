@@ -4,8 +4,9 @@ use crate::pipeline::{SplattedBlocks, SplattedDepth, SplattedVolumes};
 use crossterm::event::{self, Event};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout};
-use ratatui::style::Stylize;
+use ratatui::style::{Color, Stylize};
 use ratatui::symbols;
+use ratatui::widgets::canvas::{Canvas, Points};
 use ratatui::widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph, Widget};
 
 use tokio::sync::Mutex;
@@ -13,6 +14,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::task::{JoinHandle, spawn};
 use tokio::time::{Duration, interval};
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -244,6 +246,79 @@ impl Widget for VolumeWidget {
     }
 }
 
+struct HeatMapWidget {
+    blocks: SplattedBlocks,
+}
+
+impl HeatMapWidget {
+    pub fn new(blocks: SplattedBlocks) -> HeatMapWidget {
+        HeatMapWidget { blocks }
+    }
+}
+
+impl Widget for HeatMapWidget {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
+        let max_vol =
+            self.blocks.volumes.iter().fold(
+                0.0,
+                |acc, vol| if acc < vol.abs() { vol.abs() } else { acc },
+            );
+        let color_map = |vol: f64| {
+            if vol < 0.0 {
+                Color::Rgb(
+                    (((vol.abs() / max_vol) * 9.0 + 1.0).round() * 25.5) as u8,
+                    0,
+                    0,
+                )
+            } else {
+                Color::Rgb(
+                    0,
+                    (((vol.abs() / max_vol) * 9.0 + 1.0).round() * 25.5) as u8,
+                    0,
+                )
+            }
+        };
+
+        let mut layered_points: HashMap<Color, Vec<(f64, f64)>> = HashMap::new();
+
+        let time_step = f64::from(area.width) / (self.blocks.volumes.shape()[0] as f64);
+        let price_step = f64::from(area.height) / (self.blocks.volumes.shape()[1] as f64);
+
+        for (t_grid, row) in self.blocks.volumes.rows().into_iter().enumerate() {
+            for (p_grid, volume) in row.into_iter().enumerate() {
+                if *volume != 0.0 {
+                    let color = color_map(*volume);
+                    let point = (
+                        time_step * t_grid as f64 - f64::from(area.left()),
+                        price_step * p_grid as f64,
+                    );
+                    if let Some(points) = layered_points.get_mut(&color) {
+                        points.push(point);
+                    } else {
+                        layered_points.insert(color, vec![point]);
+                    }
+                }
+            }
+        }
+
+        let canvas = Canvas::default()
+            .block(Block::bordered().title("Order Map"))
+            .x_bounds([0.0, f64::from(area.width)])
+            .y_bounds([0.0, f64::from(area.height)])
+            .marker(symbols::Marker::Block)
+            .paint(|context| {
+                for (color, points) in layered_points.iter() {
+                    context.draw(&Points {
+                        coords: points,
+                        color: color.clone(),
+                    });
+                }
+            });
+
+        canvas.render(area, buf)
+    }
+}
+
 pub struct App {
     render_loop: JoinHandle<Result<(), String>>,
     pipeline_request_loop: JoinHandle<Result<(), String>>,
@@ -399,34 +474,31 @@ impl App {
 
                     let vertical_data_chunks = Layout::vertical(vec![
                         Constraint::Percentage(65),
-                        Constraint::Percentage(10),
-                        Constraint::Percentage(25),
+                        Constraint::Percentage(35),
                     ])
                     .split(data_chunk);
 
                     let top_data_chunks = Layout::horizontal(vec![
                         Constraint::Percentage(65),
-                        Constraint::Percentage(10),
-                        Constraint::Percentage(25),
+                        Constraint::Percentage(35),
                     ])
                     .split(vertical_data_chunks[0]);
 
                     let bottom_data_chunks = Layout::horizontal(vec![
                         Constraint::Percentage(65),
-                        Constraint::Percentage(10),
-                        Constraint::Percentage(25),
+                        Constraint::Percentage(35),
                     ])
-                    .split(vertical_data_chunks[2]);
+                    .split(vertical_data_chunks[1]);
 
                     match state.depth {
                         Some(splatted) => {
                             let depth_widget = DepthWidget::new(splatted);
-                            frame.render_widget(depth_widget, top_data_chunks[2]);
+                            frame.render_widget(depth_widget, top_data_chunks[1]);
                         }
                         None => {
                             frame.render_widget(
                                 Paragraph::new("Loading...").alignment(Alignment::Center),
-                                top_data_chunks[2],
+                                top_data_chunks[1],
                             );
                         }
                     }
@@ -440,6 +512,19 @@ impl App {
                             frame.render_widget(
                                 Paragraph::new("Loading...").alignment(Alignment::Center),
                                 bottom_data_chunks[0],
+                            );
+                        }
+                    }
+
+                    match state.blocks {
+                        Some(splatted) => {
+                            let blocks_widget = HeatMapWidget::new(splatted);
+                            frame.render_widget(blocks_widget, top_data_chunks[0]);
+                        }
+                        None => {
+                            frame.render_widget(
+                                Paragraph::new("Loading...").alignment(Alignment::Center),
+                                top_data_chunks[0],
                             );
                         }
                     }
