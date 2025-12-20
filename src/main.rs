@@ -38,7 +38,6 @@ struct Dispatch {
     tickers: HashMap<String, Option<TickerState>>,
     books: BooksCache,
     pipeline: Pipeline,
-    buffers: HashMap<String, Option<(SplattedDepth, SplattedVolumes, SplattedBlocks)>>,
     app: Option<App>,
 }
 
@@ -70,7 +69,6 @@ impl Dispatch {
                 time_resolution,
                 price_resolution,
             ),
-            buffers: HashMap::new(),
             app: None,
         })
     }
@@ -86,7 +84,6 @@ impl Dispatch {
                         ticker.clone(),
                         BookHistory::new(self.books.time_cache_window_seconds.clone()),
                     );
-                    self.buffers.insert(ticker.clone(), None);
 
                     match self.feed.subscribe(ticker).await {
                         Ok(()) => (),
@@ -99,10 +96,10 @@ impl Dispatch {
                     }
                 }
                 Action::RunPipeline(ticker) => match self.books.cache.get(&ticker) {
-                    Some(history) => {
-                        self.buffers
-                            .insert(ticker, Some(self.pipeline.run(history).await));
-                    }
+                    Some(history) => match &self.app {
+                        Some(app) => app.update_splats(self.pipeline.run(history).await).await,
+                        None => (),
+                    },
                     None => (),
                 },
                 Action::UnsubscribeTicker(ticker) => {
@@ -118,7 +115,6 @@ impl Dispatch {
 
                     self.tickers.remove(&ticker);
                     self.books.cache.remove(&ticker);
-                    self.buffers.remove(&ticker);
                 }
                 Action::Quit => break,
                 Action::UpdateBook(update) => {
