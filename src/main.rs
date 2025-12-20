@@ -78,8 +78,8 @@ impl Dispatch {
     pub async fn run(&mut self) -> Result<(), String> {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
-                Action::Inform(message) => println!("{}", message),
-                Action::Launch => self.app = Some(App::new().await),
+                Action::Inform(message) => (), // TODO: setup logs
+                Action::Launch => self.app = Some(App::new(self.sender()).await),
                 Action::SubscribeTicker(ticker) => {
                     self.tickers.insert(ticker.clone(), None);
                     self.books.cache.insert(
@@ -120,7 +120,7 @@ impl Dispatch {
                     self.books.cache.remove(&ticker);
                     self.buffers.remove(&ticker);
                 }
-                Action::Quit => println!("Got quit action"),
+                Action::Quit => break,
                 Action::UpdateBook(update) => {
                     let symbol = update.symbol.clone();
                     match self.books.cache.get_mut(&symbol) {
@@ -156,7 +156,7 @@ impl Dispatch {
                         }
                     }
                 }
-                Action::Warn(message) => eprintln!("{}", message),
+                Action::Warn(message) => (), // TODO: setup warnings
             }
         }
         Ok(())
@@ -187,11 +187,6 @@ async fn main() -> Result<(), String> {
         .send(Action::SubscribeTicker("ETH/EUR".to_string()))
         .await
     {
-        Ok(_) => (),
-        Err(message) => return Err(format!("{:?}", message)),
-    };
-
-    match sender.send(Action::Quit).await {
         Ok(_) => (),
         Err(message) => return Err(format!("{:?}", message)),
     };
