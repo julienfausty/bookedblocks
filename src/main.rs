@@ -165,7 +165,7 @@ impl Dispatch {
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 108, 72).await {
+    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 90, 50).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };

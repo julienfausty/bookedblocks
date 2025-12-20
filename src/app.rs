@@ -6,7 +6,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::Stylize;
 use ratatui::symbols;
-use ratatui::widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph};
+use ratatui::widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph, Widget};
 
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
@@ -31,6 +31,217 @@ struct State {
     pub depth: Option<SplattedDepth>,
     pub volumes: Option<SplattedVolumes>,
     pub blocks: Option<SplattedBlocks>,
+}
+
+struct DepthWidget {
+    depth: SplattedDepth,
+}
+
+impl DepthWidget {
+    pub fn new(depth: SplattedDepth) -> DepthWidget {
+        DepthWidget { depth }
+    }
+}
+
+impl Widget for DepthWidget {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
+        let x_axis = Axis::default()
+            .title("Price")
+            .bounds([self.depth.price_range.0, self.depth.price_range.1])
+            .labels([
+                format!("{:}", self.depth.price_range.0),
+                format!(
+                    "{:}",
+                    (self.depth.price_range.0 + self.depth.price_range.1) / 2.0
+                ),
+                format!("{:}", self.depth.price_range.1),
+            ]);
+
+        let max_vol = self.depth.volumes.iter().fold(f64::MIN, |acc, volume| {
+            if acc < volume.abs() {
+                volume.clone()
+            } else {
+                acc
+            }
+        });
+
+        let y_axis = Axis::default()
+            .title("Volumes")
+            .bounds([-max_vol, max_vol])
+            .labels([
+                format!("{:}", max_vol),
+                format!("0.0"),
+                format!("{:}", max_vol),
+            ]);
+
+        let step = (self.depth.price_range.1 - self.depth.price_range.0)
+            / (self.depth.volumes.len() as f64);
+        let ask_graph = self
+            .depth
+            .volumes
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, vol)| {
+                (
+                    ((index as f64) * step) + self.depth.price_range.0,
+                    if vol > 0.0 { vol } else { 0.0 },
+                )
+            })
+            .filter(|(_, vol)| *vol != 0.0)
+            .collect::<Vec<_>>();
+
+        let ask_dataset = Dataset::default()
+            .name("Asks")
+            .data(&ask_graph)
+            .marker(symbols::Marker::Block)
+            .graph_type(GraphType::Bar)
+            .green();
+
+        let bid_graph = self
+            .depth
+            .volumes
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, vol)| {
+                (
+                    ((index as f64) * step) + self.depth.price_range.0,
+                    if vol < 0.0 { vol } else { 0.0 },
+                )
+            })
+            .filter(|(_, vol)| *vol != 0.0)
+            .collect::<Vec<_>>();
+
+        let bid_dataset = Dataset::default()
+            .name("Bids")
+            .data(&bid_graph)
+            .marker(symbols::Marker::Block)
+            .graph_type(GraphType::Bar)
+            .red();
+
+        let chart = Chart::new(vec![ask_dataset, bid_dataset])
+            .block(Block::bordered().title("Depth"))
+            .x_axis(x_axis)
+            .y_axis(y_axis);
+
+        chart.render(area, buf)
+    }
+}
+
+struct VolumeWidget {
+    volumes: SplattedVolumes,
+}
+
+impl VolumeWidget {
+    pub fn new(volumes: SplattedVolumes) -> VolumeWidget {
+        VolumeWidget { volumes }
+    }
+}
+
+impl Widget for VolumeWidget {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
+        let x_axis = Axis::default()
+            .title("Time (s)")
+            .bounds([
+                self.volumes.time_range.0 as f64,
+                self.volumes.time_range.1 as f64,
+            ])
+            .labels([
+                format!("{:}", self.volumes.time_range.1 - self.volumes.time_range.0),
+                format!(
+                    "{:}",
+                    (self.volumes.time_range.1 - self.volumes.time_range.0) / 2
+                ),
+                "now".to_string(),
+            ]);
+
+        let max_vol = self
+            .volumes
+            .ask_volumes
+            .iter()
+            .fold(f64::MIN, |acc, volume| {
+                if acc < volume.abs() {
+                    volume.clone()
+                } else {
+                    acc
+                }
+            });
+
+        let max_vol = self
+            .volumes
+            .bid_volumes
+            .iter()
+            .fold(max_vol, |acc, volume| {
+                if acc < volume.abs() {
+                    volume.clone()
+                } else {
+                    acc
+                }
+            });
+
+        let y_axis = Axis::default()
+            .title("Volumes")
+            .bounds([-max_vol, max_vol])
+            .labels([
+                format!("{:}", max_vol),
+                format!("0.0"),
+                format!("{:}", max_vol),
+            ]);
+
+        let step = ((self.volumes.time_range.1 - self.volumes.time_range.0) as f64)
+            / (self.volumes.ask_volumes.len() as f64);
+        let ask_graph = self
+            .volumes
+            .ask_volumes
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, vol)| {
+                (
+                    ((index as f64) * step) + self.volumes.time_range.0 as f64,
+                    vol,
+                )
+            })
+            .filter(|(_, vol)| *vol != 0.0)
+            .collect::<Vec<_>>();
+
+        let ask_dataset = Dataset::default()
+            .name("Asks")
+            .data(&ask_graph)
+            .marker(symbols::Marker::Block)
+            .graph_type(GraphType::Bar)
+            .green();
+
+        let bid_graph = self
+            .volumes
+            .bid_volumes
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, vol)| {
+                (
+                    ((index as f64) * step) + self.volumes.time_range.0 as f64,
+                    -vol,
+                )
+            })
+            .filter(|(_, vol)| *vol != 0.0)
+            .collect::<Vec<_>>();
+
+        let bid_dataset = Dataset::default()
+            .name("Bids")
+            .data(&bid_graph)
+            .marker(symbols::Marker::Block)
+            .graph_type(GraphType::Bar)
+            .red();
+
+        let chart = Chart::new(vec![bid_dataset, ask_dataset])
+            .block(Block::bordered().title("Order Volumes"))
+            .x_axis(x_axis)
+            .y_axis(y_axis);
+
+        chart.render(area, buf)
+    }
 }
 
 pub struct App {
@@ -209,62 +420,26 @@ impl App {
 
                     match state.depth {
                         Some(splatted) => {
-                            let x_axis = Axis::default()
-                                .title("Price")
-                                .bounds([splatted.price_range.0, splatted.price_range.1])
-                                .labels([
-                                    format!("{:}", splatted.price_range.0),
-                                    format!(
-                                        "{:}",
-                                        (splatted.price_range.0 + splatted.price_range.1) / 2.0
-                                    ),
-                                    format!("{:}", splatted.price_range.1),
-                                ]);
-
-                            let max_vol = splatted.volumes.iter().fold(f64::MIN, |acc, volume| {
-                                if acc < *volume { volume.clone() } else { acc }
-                            });
-                            let min_vol = splatted.volumes.iter().fold(f64::MAX, |acc, volume| {
-                                if acc > *volume { volume.clone() } else { acc }
-                            });
-                            let y_axis = Axis::default()
-                                .title("Volumes")
-                                .bounds([min_vol, max_vol])
-                                .labels([
-                                    format!("{:}", min_vol),
-                                    format!("{:}", (min_vol + max_vol) / 2.0),
-                                    format!("{:}", max_vol),
-                                ]);
-
-                            let step = (splatted.price_range.1 - splatted.price_range.0)
-                                / (splatted.volumes.len() as f64);
-                            let graph = splatted
-                                .volumes
-                                .clone()
-                                .into_iter()
-                                .enumerate()
-                                .map(|(index, vol)| {
-                                    (((index as f64) * step) + splatted.price_range.0, vol)
-                                })
-                                .collect::<Vec<_>>();
-
-                            let depth_dataset = Dataset::default()
-                                .name("Depth")
-                                .data(&graph)
-                                .marker(symbols::Marker::HalfBlock)
-                                .graph_type(GraphType::Bar)
-                                .green();
-
-                            let depth_widget = Chart::new(vec![depth_dataset])
-                                .block(Block::bordered().title("Depth"))
-                                .x_axis(x_axis)
-                                .y_axis(y_axis);
+                            let depth_widget = DepthWidget::new(splatted);
                             frame.render_widget(depth_widget, top_data_chunks[2]);
                         }
                         None => {
                             frame.render_widget(
                                 Paragraph::new("Loading...").alignment(Alignment::Center),
                                 top_data_chunks[2],
+                            );
+                        }
+                    }
+
+                    match state.volumes {
+                        Some(splatted) => {
+                            let volume_widget = VolumeWidget::new(splatted);
+                            frame.render_widget(volume_widget, bottom_data_chunks[0]);
+                        }
+                        None => {
+                            frame.render_widget(
+                                Paragraph::new("Loading...").alignment(Alignment::Center),
+                                bottom_data_chunks[0],
                             );
                         }
                     }
