@@ -18,6 +18,7 @@ use tokio::time::{Duration, interval};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Enum of different pages one could move to in application
 #[derive(Debug, Clone)]
 pub enum Page {
     Search,
@@ -25,6 +26,7 @@ pub enum Page {
     Ticker,
 }
 
+/// State data structure relevant to rendering interface
 #[derive(Clone, Debug)]
 pub struct State {
     pub page: Page,
@@ -37,11 +39,13 @@ pub struct State {
     pub blocks: Option<SplattedBlocks>,
 }
 
+/// Widget for rendering TickerState in interface
 struct TickerWidget {
     state: TickerState,
 }
 
 impl TickerWidget {
+    /// constructor
     pub fn new(state: TickerState) -> TickerWidget {
         TickerWidget { state }
     }
@@ -170,6 +174,7 @@ impl Widget for TickerWidget {
     }
 }
 
+/// Widget for rendering market depth to interface
 struct DepthWidget {
     depth: SplattedDepth,
 }
@@ -266,6 +271,7 @@ impl Widget for DepthWidget {
     }
 }
 
+/// Widget for rendering market volumes to interface
 struct VolumeWidget {
     volumes: SplattedVolumes,
 }
@@ -381,6 +387,7 @@ impl Widget for VolumeWidget {
     }
 }
 
+/// Widget for rendering order book heat map to interface
 struct HeatMapWidget {
     blocks: SplattedBlocks,
 }
@@ -503,6 +510,7 @@ impl Widget for HeatMapWidget {
     }
 }
 
+/// Encapsulation structure for handling user interface
 pub struct App {
     render_loop: JoinHandle<Result<(), String>>,
     pipeline_request_loop: JoinHandle<Result<(), String>>,
@@ -510,6 +518,7 @@ pub struct App {
 }
 
 impl App {
+    /// constructor
     pub async fn new(sender: Sender<Action>) -> App {
         let state = Arc::new(Mutex::new(State {
             page: Page::Ticker,
@@ -535,15 +544,18 @@ impl App {
         }
     }
 
+    /// Set the current ticker in the application state
     pub async fn set_current_ticker(&self, ticker: String) {
         let mut locked_state = self.state.lock().await;
         locked_state.current_ticker = Some(ticker.clone());
     }
 
+    /// Get the state object used for rendering
     pub fn get_state(&self) -> Arc<Mutex<State>> {
         self.state.clone()
     }
 
+    /// Method to request pipeline updates regularly and keep state data updated
     async fn request_pipeline(
         sender: Sender<Action>,
         state: Arc<Mutex<State>>,
@@ -561,6 +573,7 @@ impl App {
         }
     }
 
+    /// Run rendering loop for user interface
     async fn run(state: Arc<Mutex<State>>) -> Result<(), String> {
         let mut terminal = ratatui::init();
 
@@ -600,6 +613,7 @@ impl App {
         run_result
     }
 
+    /// Render single frame using provided state object
     fn render(frame: &mut Frame, state: State) {
         let top_block = Block::bordered().title("bookedblocks");
 

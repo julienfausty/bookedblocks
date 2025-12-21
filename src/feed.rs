@@ -30,6 +30,7 @@ macro_rules! decimal_to_f64 {
     };
 }
 
+/// Data structure holding general information on a symbol
 #[derive(Clone, Debug)]
 pub struct TickerState {
     pub ask: f64,
@@ -47,6 +48,7 @@ pub struct TickerState {
 }
 
 impl TickerState {
+    /// convert from kraken_async_rs
     pub fn from_ticker(ticker: Ticker) -> Result<TickerState, String> {
         Ok(TickerState {
             ask: decimal_to_f64!(ticker.ask),
@@ -65,6 +67,7 @@ impl TickerState {
     }
 }
 
+/// Data structure holding information on an order or order level
 #[derive(Debug, PartialEq)]
 pub struct Order {
     pub price: f64,
@@ -72,6 +75,7 @@ pub struct Order {
 }
 
 impl Order {
+    /// convert from kraken_async_rs
     pub fn from_bid_ask(bid_ask: BidAsk) -> Result<Order, String> {
         Ok(Order {
             price: decimal_to_f64!(bid_ask.price),
@@ -80,6 +84,7 @@ impl Order {
     }
 }
 
+/// Data structure holding an order book update
 #[derive(Debug)]
 pub struct Booked {
     pub symbol: String,
@@ -89,6 +94,7 @@ pub struct Booked {
 }
 
 impl Booked {
+    /// convert from kraken_async_rs
     pub fn from_orderbook(book: L2) -> Result<Booked, String> {
         match book {
             L2::Orderbook(snapshot) => Ok(Booked {
@@ -123,6 +129,7 @@ impl Booked {
     }
 }
 
+/// Encapsulating object for the websocket connection to Kraken API
 pub struct Feed {
     // websocket connection to Kraken WS API
     connection: Arc<Mutex<KrakenMessageStream<WssMessage>>>,
@@ -134,6 +141,8 @@ pub struct Feed {
     request_id: i64,
 }
 
+/// method to be spawned in separate thread that listens to websocket connection and forwards to
+/// action queue
 async fn listen_to_connection(
     sender: Sender<Action>,
     connection: Arc<Mutex<KrakenMessageStream<WssMessage>>>,
@@ -192,6 +201,7 @@ async fn listen_to_connection(
 }
 
 impl Feed {
+    /// constructor
     pub async fn new(
         timeout_in_seconds: u64,
         depth: i32,
@@ -216,6 +226,7 @@ impl Feed {
         })
     }
 
+    /// subscribe a new ticker symbol
     pub async fn subscribe(&mut self, ticker: String) -> Result<(), String> {
         let mut book_subscription = BookSubscription::new(vec![ticker.clone()]);
         book_subscription.snapshot = Some(true);
@@ -243,6 +254,7 @@ impl Feed {
         }
     }
 
+    /// unsubscribe a previously subscribed ticker
     pub async fn unsubscribe(&mut self, ticker: String) -> Result<(), String> {
         let mut book_subscription = BookSubscription::new(vec![ticker.clone()]);
         book_subscription.depth = Some(self.depth);
@@ -271,6 +283,7 @@ impl Feed {
         }
     }
 
+    /// check that the thread litening at websocket is ok
     pub async fn check_listener(self) -> Result<Option<Feed>, String> {
         if self.listener_handle.is_finished() {
             return match self.listener_handle.await {

@@ -5,6 +5,7 @@ fn gaussian_kernel_1d(value: f64, deviation: &f64, mean: &f64) -> f64 {
         * (-(value - mean).powi(2) / (2.0 * deviation.powi(2))).exp()
 }
 
+/// method for gaussian kernel density estimation from a source sample onto regular 1D grid
 pub fn splat_1d(range: &(f64, f64), grid_size: usize, source: Vec<(f64, f64)>) -> Vec<f64> {
     let mut support = vec![0.0; grid_size];
 
@@ -56,6 +57,7 @@ fn gaussian_kernel_2d(values: (f64, f64), deviations: &(f64, f64), means: &(f64,
         .exp()
 }
 
+/// method for gaussian kernel density estimation from a source sample onto regular 2D grid
 pub fn splat_2d(
     ranges: (&(f64, f64), &(f64, f64)),
     grid_sizes: (usize, usize),

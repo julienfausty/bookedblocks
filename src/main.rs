@@ -22,6 +22,7 @@ use pipeline::{BookHistory, Pipeline};
 
 mod splat;
 
+/// Local cache in Dispatch holding all order book histories
 struct BooksCache {
     time_cache_window_seconds: usize,
     cache: HashMap<String, BookHistory>,
@@ -36,17 +37,26 @@ impl BooksCache {
     }
 }
 
+/// Dispatcher pattern used to coordinate application actions and trigger events
 struct Dispatch {
+    /// receiver end of action queue
     action_receiver: Receiver<Action>,
+    /// sender end of action queue
     action_sender: Sender<Action>,
+    /// order book data feed
     feed: Feed,
+    /// cache for the ticker state data
     tickers: HashMap<String, Option<TickerState>>,
+    /// cache for the entire book history data
     books: BooksCache,
+    /// prototype pattern pipeline for copying into pipeline threads
     pipeline: Pipeline,
+    /// encapsulation structure for the user interface
     app: App,
 }
 
 impl Dispatch {
+    /// constructor
     pub async fn new(
         buffer_size: usize,
         websocket_timeout_seconds: u64,
@@ -78,6 +88,7 @@ impl Dispatch {
         })
     }
 
+    /// spawn a pipeline run in a separate thread with given book history and deposit into state
     async fn spawn_pipeline(
         history: BookHistory,
         pipeline: Pipeline,
@@ -92,6 +103,7 @@ impl Dispatch {
         })
     }
 
+    /// run action queue dispatching
     pub async fn run(&mut self) -> Result<(), String> {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
@@ -175,6 +187,7 @@ impl Dispatch {
         Ok(())
     }
 
+    /// get action queue sender copy
     pub fn sender(&self) -> Sender<Action> {
         self.action_sender.clone()
     }
@@ -184,6 +197,7 @@ impl Dispatch {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// ticker symbol to visualize
     #[arg(required = true)]
     ticker: String,
 }
