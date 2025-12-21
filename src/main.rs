@@ -1,3 +1,5 @@
+use clap::Parser;
+
 use tokio;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -178,9 +180,19 @@ impl Dispatch {
     }
 }
 
+/// Visualizer of Kraken order books
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(required = true)]
+    ticker: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 185, 100).await {
+    let args = Args::parse();
+
+    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 370, 200).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };
@@ -189,10 +201,7 @@ async fn main() -> Result<(), String> {
 
     let running = dispatch.run();
 
-    match sender
-        .send(Action::SubscribeTicker("ETH/EUR".to_string()))
-        .await
-    {
+    match sender.send(Action::SubscribeTicker(args.ticker)).await {
         Ok(_) => (),
         Err(message) => return Err(format!("{:?}", message)),
     };
