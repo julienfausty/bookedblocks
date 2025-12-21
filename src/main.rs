@@ -1,16 +1,24 @@
+use clap::Parser;
+
 use tokio;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::task::{JoinHandle, spawn};
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 mod actions;
 use actions::Action;
+
+mod app;
+use app::{App, State};
 
 mod feed;
 use feed::{Feed, TickerState};
 
 mod pipeline;
-use pipeline::{BookHistory, Pipeline, SplattedBlocks, SplattedDepth, SplattedVolumes};
+use pipeline::{BookHistory, Pipeline};
 
 mod splat;
 
@@ -35,7 +43,7 @@ struct Dispatch {
     tickers: HashMap<String, Option<TickerState>>,
     books: BooksCache,
     pipeline: Pipeline,
-    buffers: HashMap<String, Option<(SplattedDepth, SplattedVolumes, SplattedBlocks)>>,
+    app: App,
 }
 
 impl Dispatch {
@@ -57,7 +65,7 @@ impl Dispatch {
 
         Ok(Dispatch {
             action_receiver: receiver,
-            action_sender: sender,
+            action_sender: sender.clone(),
             feed,
             tickers: HashMap::new(),
             books: BooksCache::new(time_cache_window_seconds),
@@ -66,22 +74,35 @@ impl Dispatch {
                 time_resolution,
                 price_resolution,
             ),
-            buffers: HashMap::new(),
+            app: App::new(sender.clone()).await,
+        })
+    }
+
+    async fn spawn_pipeline(
+        history: BookHistory,
+        pipeline: Pipeline,
+        state: Arc<Mutex<State>>,
+    ) -> JoinHandle<()> {
+        spawn(async move {
+            let buffer = pipeline.run(&history).await;
+            let mut locked_state = state.lock().await;
+            locked_state.depth = Some(buffer.0);
+            locked_state.volumes = Some(buffer.1);
+            locked_state.blocks = Some(buffer.2);
         })
     }
 
     pub async fn run(&mut self) -> Result<(), String> {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
-                Action::Inform(message) => println!("{}", message),
-                Action::Launch => println!("Got launch action"),
+                Action::Inform(message) => (), // TODO: setup logs
                 Action::SubscribeTicker(ticker) => {
                     self.tickers.insert(ticker.clone(), None);
                     self.books.cache.insert(
                         ticker.clone(),
                         BookHistory::new(self.books.time_cache_window_seconds.clone()),
                     );
-                    self.buffers.insert(ticker.clone(), None);
+                    self.app.set_current_ticker(ticker.clone()).await;
 
                     match self.feed.subscribe(ticker).await {
                         Ok(()) => (),
@@ -95,8 +116,13 @@ impl Dispatch {
                 }
                 Action::RunPipeline(ticker) => match self.books.cache.get(&ticker) {
                     Some(history) => {
-                        self.buffers
-                            .insert(ticker, Some(self.pipeline.run(history).await));
+                        let cloned_history = history.extract_window(0, i64::MAX).await;
+                        Dispatch::spawn_pipeline(
+                            cloned_history,
+                            self.pipeline.clone(),
+                            self.app.get_state(),
+                        )
+                        .await;
                     }
                     None => (),
                 },
@@ -113,9 +139,8 @@ impl Dispatch {
 
                     self.tickers.remove(&ticker);
                     self.books.cache.remove(&ticker);
-                    self.buffers.remove(&ticker);
                 }
-                Action::Quit => println!("Got quit action"),
+                Action::Quit => break,
                 Action::UpdateBook(update) => {
                     let symbol = update.symbol.clone();
                     match self.books.cache.get_mut(&symbol) {
@@ -129,19 +154,10 @@ impl Dispatch {
                             ));
                         }
                     }
-
-                    match self
-                        .action_sender
-                        .send(Action::RunPipeline(symbol.clone()))
-                        .await
-                    {
-                        Ok(_) => (),
-                        Err(message) => return Err(format!("{:?}", message)),
-                    }
                 }
                 Action::UpdateTicker(update) => {
                     let symbol = update.symbol.clone();
-                    match self.tickers.insert(symbol.clone(), Some(update)) {
+                    match self.tickers.insert(symbol.clone(), Some(update.clone())) {
                         Some(_) => (),
                         None => {
                             return Err(format!(
@@ -150,8 +166,10 @@ impl Dispatch {
                             ));
                         }
                     }
+
+                    self.app.get_state().lock().await.ticker_data = Some(update);
                 }
-                Action::Warn(message) => eprintln!("{}", message),
+                Action::Warn(message) => (), // TODO: setup warnings
             }
         }
         Ok(())
@@ -162,9 +180,19 @@ impl Dispatch {
     }
 }
 
+/// Visualizer of Kraken order books
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(required = true)]
+    ticker: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 108, 72).await {
+    let args = Args::parse();
+
+    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 370, 200).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };
@@ -173,20 +201,7 @@ async fn main() -> Result<(), String> {
 
     let running = dispatch.run();
 
-    match sender.send(Action::Launch).await {
-        Ok(_) => (),
-        Err(message) => return Err(format!("{:?}", message)),
-    };
-
-    match sender
-        .send(Action::SubscribeTicker("ETH/EUR".to_string()))
-        .await
-    {
-        Ok(_) => (),
-        Err(message) => return Err(format!("{:?}", message)),
-    };
-
-    match sender.send(Action::Quit).await {
+    match sender.send(Action::SubscribeTicker(args.ticker)).await {
         Ok(_) => (),
         Err(message) => return Err(format!("{:?}", message)),
     };
