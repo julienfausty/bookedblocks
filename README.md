@@ -2,6 +2,8 @@
 
 A Terminal User Iterface (TUI) for visualizing Kraken's order book using its WebSocket API.
 
+![demo](media/captured_bookedblocks.mp4)
+
 ## Quick start
 
 This project is a pure Rust project and conforms to the classic `cargo` build system:
