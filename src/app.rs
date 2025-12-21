@@ -6,7 +6,6 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Color, Stylize};
 use ratatui::symbols;
-use ratatui::widgets::canvas::{Canvas, Points};
 use ratatui::widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph, Widget};
 
 use tokio::sync::Mutex;
@@ -96,7 +95,7 @@ impl Widget for DepthWidget {
         let ask_dataset = Dataset::default()
             .name("Asks")
             .data(&ask_graph)
-            .marker(symbols::Marker::Block)
+            .marker(symbols::Marker::HalfBlock)
             .graph_type(GraphType::Bar)
             .green();
 
@@ -118,7 +117,7 @@ impl Widget for DepthWidget {
         let bid_dataset = Dataset::default()
             .name("Bids")
             .data(&bid_graph)
-            .marker(symbols::Marker::Block)
+            .marker(symbols::Marker::HalfBlock)
             .graph_type(GraphType::Bar)
             .red();
 
@@ -211,7 +210,7 @@ impl Widget for VolumeWidget {
         let ask_dataset = Dataset::default()
             .name("Asks")
             .data(&ask_graph)
-            .marker(symbols::Marker::Block)
+            .marker(symbols::Marker::HalfBlock)
             .graph_type(GraphType::Bar)
             .green();
 
@@ -233,7 +232,7 @@ impl Widget for VolumeWidget {
         let bid_dataset = Dataset::default()
             .name("Bids")
             .data(&bid_graph)
-            .marker(symbols::Marker::Block)
+            .marker(symbols::Marker::HalfBlock)
             .graph_type(GraphType::Bar)
             .red();
 
@@ -258,6 +257,39 @@ impl HeatMapWidget {
 
 impl Widget for HeatMapWidget {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
+        let x_axis = Axis::default()
+            .title("Time (s)")
+            .bounds([
+                self.blocks.grid.time_range.0 as f64,
+                self.blocks.grid.time_range.1 as f64,
+            ])
+            .labels([
+                format!(
+                    "{:}",
+                    self.blocks.grid.time_range.1 - self.blocks.grid.time_range.0
+                ),
+                format!(
+                    "{:}",
+                    (self.blocks.grid.time_range.1 - self.blocks.grid.time_range.0) / 2
+                ),
+                "now".to_string(),
+            ]);
+
+        let y_axis = Axis::default()
+            .title("Price")
+            .bounds([
+                self.blocks.grid.price_range.0,
+                self.blocks.grid.price_range.1,
+            ])
+            .labels([
+                format!("{:}", self.blocks.grid.price_range.0),
+                format!(
+                    "{:}",
+                    (self.blocks.grid.price_range.1 + self.blocks.grid.price_range.0) / 2.0
+                ),
+                format!("{:}", self.blocks.grid.price_range.1),
+            ]);
+
         let max_vol =
             self.blocks.volumes.iter().fold(
                 0.0,
@@ -281,16 +313,18 @@ impl Widget for HeatMapWidget {
 
         let mut layered_points: HashMap<Color, Vec<(f64, f64)>> = HashMap::new();
 
-        let time_step = f64::from(area.width) / (self.blocks.volumes.shape()[0] as f64);
-        let price_step = f64::from(area.height) / (self.blocks.volumes.shape()[1] as f64);
+        let time_step = (self.blocks.grid.time_range.1 - self.blocks.grid.time_range.0) as f64
+            / (self.blocks.volumes.shape()[0] as f64);
+        let price_step = (self.blocks.grid.price_range.1 - self.blocks.grid.price_range.0)
+            / (self.blocks.volumes.shape()[1] as f64);
 
         for (t_grid, row) in self.blocks.volumes.rows().into_iter().enumerate() {
             for (p_grid, volume) in row.into_iter().enumerate() {
                 if volume.abs() >= 0.001 * max_vol {
                     let color = color_map(*volume);
                     let point = (
-                        time_step * t_grid as f64 - f64::from(area.left()),
-                        price_step * p_grid as f64,
+                        time_step * t_grid as f64 + self.blocks.grid.time_range.0 as f64,
+                        price_step * p_grid as f64 + self.blocks.grid.price_range.0 as f64,
                     );
                     if let Some(points) = layered_points.get_mut(&color) {
                         points.push(point);
@@ -313,21 +347,23 @@ impl Widget for HeatMapWidget {
             .collect::<Vec<_>>();
         sorted_points.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
 
-        let canvas = Canvas::default()
-            .block(Block::bordered().title("Order Map"))
-            .x_bounds([0.0, f64::from(area.width)])
-            .y_bounds([0.0, f64::from(area.height)])
-            .marker(symbols::Marker::Block)
-            .paint(|context| {
-                for (_, color, points) in sorted_points.iter() {
-                    context.draw(&Points {
-                        coords: points,
-                        color: color.clone(),
-                    });
-                }
-            });
+        let datasets = sorted_points
+            .iter()
+            .map(|(_, color, points)| {
+                Dataset::default()
+                    .data(points)
+                    .marker(symbols::Marker::HalfBlock)
+                    .graph_type(GraphType::Scatter)
+                    .style(color.clone())
+            })
+            .collect::<Vec<_>>();
 
-        canvas.render(area, buf)
+        let chart = Chart::new(datasets)
+            .block(Block::bordered().title("Order Map"))
+            .x_axis(x_axis)
+            .y_axis(y_axis);
+
+        chart.render(area, buf)
     }
 }
 
