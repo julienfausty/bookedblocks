@@ -18,14 +18,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
-enum Page {
+pub enum Page {
     Search,
     Logs,
     Ticker,
 }
 
 #[derive(Clone, Debug)]
-struct State {
+pub struct State {
     pub page: Page,
     pub sender: Sender<Action>,
     pub tickers: Option<Vec<String>>,
@@ -286,7 +286,7 @@ impl Widget for HeatMapWidget {
 
         for (t_grid, row) in self.blocks.volumes.rows().into_iter().enumerate() {
             for (p_grid, volume) in row.into_iter().enumerate() {
-                if *volume != 0.0 {
+                if volume.abs() >= 0.001 * max_vol {
                     let color = color_map(*volume);
                     let point = (
                         time_step * t_grid as f64 - f64::from(area.left()),
@@ -367,11 +367,8 @@ impl App {
         locked_state.current_ticker = Some(ticker.clone());
     }
 
-    pub async fn update_splats(&self, splats: (SplattedDepth, SplattedVolumes, SplattedBlocks)) {
-        let mut locked_state = self.state.lock().await;
-        locked_state.depth = Some(splats.0);
-        locked_state.volumes = Some(splats.1);
-        locked_state.blocks = Some(splats.2);
+    pub fn get_state(&self) -> Arc<Mutex<State>> {
+        self.state.clone()
     }
 
     async fn request_pipeline(

@@ -1,13 +1,16 @@
 use tokio;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::{Mutex, RwLock};
+use tokio::task::{JoinHandle, spawn};
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 mod actions;
 use actions::Action;
 
 mod app;
-use app::App;
+use app::{App, State};
 
 mod feed;
 use feed::{Feed, TickerState};
@@ -73,6 +76,20 @@ impl Dispatch {
         })
     }
 
+    async fn spawn_pipeline(
+        history: BookHistory,
+        pipeline: Pipeline,
+        state: Arc<Mutex<State>>,
+    ) -> JoinHandle<()> {
+        spawn(async move {
+            let buffer = pipeline.run(&history).await;
+            let mut locked_state = state.lock().await;
+            locked_state.depth = Some(buffer.0);
+            locked_state.volumes = Some(buffer.1);
+            locked_state.blocks = Some(buffer.2);
+        })
+    }
+
     pub async fn run(&mut self) -> Result<(), String> {
         while let Some(action) = self.action_receiver.recv().await {
             match action {
@@ -97,8 +114,13 @@ impl Dispatch {
                 }
                 Action::RunPipeline(ticker) => match self.books.cache.get(&ticker) {
                     Some(history) => {
-                        let buffer = self.pipeline.run(history).await;
-                        self.app.update_splats(buffer).await
+                        let cloned_history = history.extract_window(0, i64::MAX).await;
+                        Dispatch::spawn_pipeline(
+                            cloned_history,
+                            self.pipeline.clone(),
+                            self.app.get_state(),
+                        )
+                        .await;
                     }
                     None => (),
                 },
@@ -129,15 +151,6 @@ impl Dispatch {
                                 symbol
                             ));
                         }
-                    }
-
-                    match self
-                        .action_sender
-                        .send(Action::RunPipeline(symbol.clone()))
-                        .await
-                    {
-                        Ok(_) => (),
-                        Err(message) => return Err(format!("{:?}", message)),
                     }
                 }
                 Action::UpdateTicker(update) => {
