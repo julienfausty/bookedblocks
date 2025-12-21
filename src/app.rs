@@ -1,4 +1,5 @@
 use crate::actions::Action;
+use crate::feed::TickerState;
 use crate::pipeline::{SplattedBlocks, SplattedDepth, SplattedVolumes};
 
 use crossterm::event::{self, Event};
@@ -29,6 +30,7 @@ pub struct State {
     pub sender: Sender<Action>,
     pub tickers: Option<Vec<String>>,
     pub current_ticker: Option<String>,
+    pub ticker_data: TickerState,
     pub depth: Option<SplattedDepth>,
     pub volumes: Option<SplattedVolumes>,
     pub blocks: Option<SplattedBlocks>,

@@ -30,7 +30,7 @@ macro_rules! decimal_to_f64 {
     };
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TickerState {
     pub ask: f64,
     pub ask_quantity: f64,

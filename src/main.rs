@@ -1,6 +1,6 @@
 use tokio;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
-use tokio::sync::{Mutex, RwLock};
 use tokio::task::{JoinHandle, spawn};
 
 use std::collections::HashMap;
@@ -155,7 +155,7 @@ impl Dispatch {
                 }
                 Action::UpdateTicker(update) => {
                     let symbol = update.symbol.clone();
-                    match self.tickers.insert(symbol.clone(), Some(update)) {
+                    match self.tickers.insert(symbol.clone(), Some(update.clone())) {
                         Some(_) => (),
                         None => {
                             return Err(format!(
@@ -164,6 +164,8 @@ impl Dispatch {
                             ));
                         }
                     }
+
+                    self.app.get_state().lock().await.ticker_data = update;
                 }
                 Action::Warn(message) => (), // TODO: setup warnings
             }
