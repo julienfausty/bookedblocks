@@ -192,7 +192,7 @@ struct Args {
 async fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 370, 200).await {
+    let mut dispatch = match Dispatch::new(1000, 200, 100, 5 * 60, 3 * 60, 370, 200).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };
