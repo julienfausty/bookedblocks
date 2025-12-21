@@ -301,13 +301,25 @@ impl Widget for HeatMapWidget {
             }
         }
 
+        let mut sorted_points = layered_points
+            .into_iter()
+            .map(|(color, points)| {
+                let (red, green) = match color.clone() {
+                    Color::Rgb(red, green, _) => (red, green),
+                    _ => (0, 0),
+                };
+                (red as u16 + green as u16, color, points)
+            })
+            .collect::<Vec<_>>();
+        sorted_points.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+
         let canvas = Canvas::default()
             .block(Block::bordered().title("Order Map"))
             .x_bounds([0.0, f64::from(area.width)])
             .y_bounds([0.0, f64::from(area.height)])
             .marker(symbols::Marker::Block)
             .paint(|context| {
-                for (color, points) in layered_points.iter() {
+                for (_, color, points) in sorted_points.iter() {
                     context.draw(&Points {
                         coords: points,
                         color: color.clone(),
