@@ -10,6 +10,7 @@ use rbtree::RBTree;
 use std::cmp::{Ordering, max, min};
 use std::iter::zip;
 
+/// Data structure for price with complete ordering
 #[derive(Clone, Debug, PartialOrd, PartialEq)]
 pub struct Price {
     pub value: f64,
@@ -23,6 +24,7 @@ impl Ord for Price {
     }
 }
 
+/// private utility method for updating a book
 fn update_books(
     books: &mut RBTree<i64, RBTree<Price, f64>>,
     time_window: usize,
@@ -66,14 +68,19 @@ fn update_books(
     }
 }
 
+/// Order book history for a single ticker symbol
 #[derive(Debug)]
 pub struct BookHistory {
+    /// size of the cache history in seconds
     pub time_window_in_seconds: usize,
+    /// accelerated data storage for asks
     pub asks: RwLock<RBTree<i64, RBTree<Price, f64>>>,
+    /// accelerated data storage for bids
     pub bids: RwLock<RBTree<i64, RBTree<Price, f64>>>,
 }
 
 impl BookHistory {
+    /// constructor
     pub fn new(time_window_in_seconds: usize) -> BookHistory {
         BookHistory {
             time_window_in_seconds,
@@ -82,6 +89,7 @@ impl BookHistory {
         }
     }
 
+    /// update the history with new orders
     pub async fn update(
         &mut self,
         booked: Booked,
@@ -125,6 +133,7 @@ impl BookHistory {
         }
     }
 
+    /// get latest information of book
     pub async fn get_latest_book(&self) -> ((i64, RBTree<Price, f64>), (i64, RBTree<Price, f64>)) {
         let readable_asks = self.asks.read().await;
         let readable_bids = self.bids.read().await;
@@ -138,6 +147,7 @@ impl BookHistory {
         }
     }
 
+    /// integrate volumes over prices in time window to get volume(time)
     pub async fn integrate_window(
         &self,
         start: i64,
@@ -164,6 +174,7 @@ impl BookHistory {
         (integrate(&readable_asks), integrate(&readable_bids))
     }
 
+    /// Extract a portion of the book history
     pub async fn extract_window(&self, start: i64, end: i64) -> BookHistory {
         let extract = |history: &RBTree<i64, RBTree<Price, f64>>| {
             RBTree::from_iter(
@@ -185,6 +196,7 @@ impl BookHistory {
     }
 }
 
+/// Data structure of 2D grid over time and price
 #[derive(Clone, Debug)]
 pub struct RenderGrid {
     pub number_time_values: usize,
@@ -193,6 +205,7 @@ pub struct RenderGrid {
     pub price_range: (f64, f64),
 }
 
+/// Construct and adapt (time, price) grid from order book
 #[derive(Clone, Debug)]
 pub struct GenerateGrid {
     time_window_in_seconds: u64,
@@ -264,12 +277,14 @@ impl GenerateGrid {
     }
 }
 
+/// Data structure representing market depth
 #[derive(Clone, Debug)]
 pub struct SplattedDepth {
     pub price_range: (f64, f64),
     pub volumes: Vec<f64>,
 }
 
+/// Functor like object for constructing market depth from order book
 pub struct SplatDepth {}
 
 impl SplatDepth {
@@ -302,6 +317,7 @@ impl SplatDepth {
     }
 }
 
+/// Data structure representing market volumes over time
 #[derive(Clone, Debug)]
 pub struct SplattedVolumes {
     pub time_range: (i64, i64),
@@ -309,6 +325,7 @@ pub struct SplattedVolumes {
     pub bid_volumes: Vec<f64>,
 }
 
+/// Functor like object for constructing market volumes from order book
 pub struct SplatVolume {}
 
 impl SplatVolume {
@@ -343,12 +360,14 @@ impl SplatVolume {
     }
 }
 
+/// Data structure representing portion of order book on 2D (time, price) grid
 #[derive(Clone, Debug)]
 pub struct SplattedBlocks {
     pub grid: RenderGrid,
     pub volumes: Array2<f64>,
 }
 
+/// Functor like object for constructing volume heat map from order book over 2D (time, price) grid
 pub struct SplatBlocks {}
 
 impl SplatBlocks {
@@ -402,6 +421,7 @@ impl SplatBlocks {
     }
 }
 
+/// Encapsulating object for running all splatting of order book to different supports
 #[derive(Clone)]
 pub struct Pipeline {
     grid_generator: GenerateGrid,
