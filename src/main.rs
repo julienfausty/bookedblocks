@@ -165,7 +165,7 @@ impl Dispatch {
                         }
                     }
 
-                    self.app.get_state().lock().await.ticker_data = update;
+                    self.app.get_state().lock().await.ticker_data = Some(update);
                 }
                 Action::Warn(message) => (), // TODO: setup warnings
             }
@@ -180,7 +180,7 @@ impl Dispatch {
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 108, 72).await {
+    let mut dispatch = match Dispatch::new(1000, 200, 100, 60 * 60, 3 * 60, 185, 100).await {
         Ok(dispatch) => dispatch,
         Err(message) => return Err(message),
     };

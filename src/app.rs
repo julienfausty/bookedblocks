@@ -5,8 +5,9 @@ use crate::pipeline::{SplattedBlocks, SplattedDepth, SplattedVolumes};
 use crossterm::event::{self, Event};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout};
-use ratatui::style::{Color, Stylize};
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::symbols;
+use ratatui::text::Text;
 use ratatui::widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph, Widget};
 
 use tokio::sync::Mutex;
@@ -30,10 +31,143 @@ pub struct State {
     pub sender: Sender<Action>,
     pub tickers: Option<Vec<String>>,
     pub current_ticker: Option<String>,
-    pub ticker_data: TickerState,
+    pub ticker_data: Option<TickerState>,
     pub depth: Option<SplattedDepth>,
     pub volumes: Option<SplattedVolumes>,
     pub blocks: Option<SplattedBlocks>,
+}
+
+struct TickerWidget {
+    state: TickerState,
+}
+
+impl TickerWidget {
+    pub fn new(state: TickerState) -> TickerWidget {
+        TickerWidget { state }
+    }
+}
+
+impl Widget for TickerWidget {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
+        let vchunks = Layout::vertical(vec![
+            Constraint::Percentage(2),
+            Constraint::Percentage(48),
+            Constraint::Percentage(48),
+            Constraint::Percentage(2),
+        ])
+        .split(area.clone());
+
+        let top_chunks = Layout::horizontal(vec![
+            Constraint::Percentage(2),
+            Constraint::Percentage(24),
+            Constraint::Percentage(24),
+            Constraint::Percentage(24),
+            Constraint::Percentage(24),
+            Constraint::Percentage(2),
+        ])
+        .split(vchunks[1]);
+
+        let bottom_chunks = Layout::horizontal(vec![
+            Constraint::Percentage(2),
+            Constraint::Percentage(24),
+            Constraint::Percentage(24),
+            Constraint::Percentage(24),
+            Constraint::Percentage(24),
+            Constraint::Percentage(2),
+        ])
+        .split(vchunks[2]);
+
+        let green_bold = Style::new().green().bold();
+        let red_bold = Style::new().red().bold();
+        let just_bold = Style::new().bold();
+
+        let ask_widget = Paragraph::new(
+            Text::from(format!("{:}", self.state.ask))
+                .alignment(Alignment::Center)
+                .style(green_bold.clone()),
+        )
+        .block(Block::bordered().title("Ask"))
+        .alignment(Alignment::Center);
+
+        ask_widget.render(top_chunks[1], buf);
+
+        let bid_widget = Paragraph::new(
+            Text::from(format!("{:}", self.state.bid))
+                .alignment(Alignment::Center)
+                .style(red_bold.clone()),
+        )
+        .block(Block::bordered().title("Bid"))
+        .alignment(Alignment::Center);
+
+        bid_widget.render(bottom_chunks[1], buf);
+
+        let change_widget = Paragraph::new(
+            Text::from(format!(
+                "{:} %\n{:}",
+                self.state.change_pct, self.state.change
+            ))
+            .alignment(Alignment::Center)
+            .style(if self.state.change < 0.0 {
+                red_bold.clone()
+            } else {
+                green_bold.clone()
+            }),
+        )
+        .block(Block::bordered().title("24hr Change"))
+        .alignment(Alignment::Center);
+
+        change_widget.render(top_chunks[2], buf);
+
+        let last_widget = Paragraph::new(
+            Text::from(format!("{:}", self.state.last))
+                .alignment(Alignment::Center)
+                .style(just_bold.clone()),
+        )
+        .block(Block::bordered().title("Last Trade"))
+        .alignment(Alignment::Center);
+
+        last_widget.render(bottom_chunks[2], buf);
+
+        let high_widget = Paragraph::new(
+            Text::from(format!("{:}", self.state.high))
+                .alignment(Alignment::Center)
+                .style(green_bold.clone()),
+        )
+        .block(Block::bordered().title("High"))
+        .alignment(Alignment::Center);
+
+        high_widget.render(top_chunks[3], buf);
+
+        let low_widget = Paragraph::new(
+            Text::from(format!("{:}", self.state.low))
+                .alignment(Alignment::Center)
+                .style(red_bold.clone()),
+        )
+        .block(Block::bordered().title("Low"))
+        .alignment(Alignment::Center);
+
+        low_widget.render(bottom_chunks[3], buf);
+
+        let volume_widget = Paragraph::new(
+            Text::from(format!("{:}", self.state.volume))
+                .alignment(Alignment::Center)
+                .style(just_bold.clone()),
+        )
+        .block(Block::bordered().title("Volume"))
+        .alignment(Alignment::Center);
+
+        volume_widget.render(top_chunks[4], buf);
+
+        let vwap_widget = Paragraph::new(
+            Text::from(format!("{:}", self.state.vwap))
+                .alignment(Alignment::Center)
+                .style(just_bold.clone()),
+        )
+        .block(Block::bordered().title("VWAP"))
+        .alignment(Alignment::Center);
+
+        vwap_widget.render(bottom_chunks[4], buf);
+    }
 }
 
 struct DepthWidget {
@@ -382,6 +516,7 @@ impl App {
             sender: sender.clone(),
             tickers: None,
             current_ticker: None,
+            ticker_data: None,
             depth: None,
             volumes: None,
             blocks: None,
@@ -572,6 +707,19 @@ impl App {
                             frame.render_widget(
                                 Paragraph::new("Loading...").alignment(Alignment::Center),
                                 top_data_chunks[0],
+                            );
+                        }
+                    }
+
+                    match state.ticker_data {
+                        Some(ticker) => {
+                            let ticker_widget = TickerWidget::new(ticker);
+                            frame.render_widget(ticker_widget, bottom_data_chunks[1]);
+                        }
+                        None => {
+                            frame.render_widget(
+                                Paragraph::new("Loading...").alignment(Alignment::Center),
+                                bottom_data_chunks[1],
                             );
                         }
                     }
