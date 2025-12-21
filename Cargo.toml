@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = "0.4.42"
+clap = { version = "4.5.32", features = ["derive"] }
 crossterm = "0.29.0"
 itertools = "0.14.0"
 kraken-async-rs = "0.14.0"
